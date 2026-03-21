@@ -1,0 +1,10 @@
+[package]
+name = "pse-scheduler"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Tick-based scheduling and macro-step orchestration for PSE"
+
+[dependencies]
+pse-types = { path = "../pse-types" }

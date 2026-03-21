@@ -1,0 +1,25 @@
+[package]
+name = "pse-gateway"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "HTTP API exposing universal PSE endpoints"
+
+[dependencies]
+pse-types = { path = "../pse-types" }
+pse-core = { path = "../pse-core" }
+pse-evidence = { path = "../pse-evidence" }
+pse-store = { path = "../pse-store" }
+pse-navigator = { path = "../pse-navigator" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+axum = { workspace = true }
+tower-http = { workspace = true }
+sha2 = { workspace = true }
+
+[dev-dependencies]
+tower = { workspace = true }

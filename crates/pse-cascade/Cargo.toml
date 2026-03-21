@@ -1,0 +1,12 @@
+[package]
+name = "pse-cascade"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Adversarial validation cascade, consensus, carrier geometry for PSE"
+
+[dependencies]
+pse-types = { path = "../pse-types" }
+serde = { workspace = true }
+thiserror = { workspace = true }

@@ -1,0 +1,12 @@
+[package]
+name = "pse-constraint"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Morphogenic graph transformations, DoF analysis, constraint propagation for PSE"
+
+[dependencies]
+pse-types = { path = "../pse-types" }
+pse-graph = { path = "../pse-graph" }
+thiserror = { workspace = true }

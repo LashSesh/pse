@@ -1,0 +1,13 @@
+[package]
+name = "pse-extract"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Pattern extraction, invariance detection, and constraint discovery for PSE"
+
+[dependencies]
+pse-types = { path = "../pse-types" }
+pse-graph = { path = "../pse-graph" }
+serde = { workspace = true }
+thiserror = { workspace = true }

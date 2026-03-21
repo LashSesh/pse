@@ -1,0 +1,12 @@
+[package]
+name = "pse-registry"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Content-addressed catalog for operators, profiles, and obligations"
+
+[dependencies]
+pse-types = { path = "../pse-types" }
+serde = { workspace = true }
+thiserror = { workspace = true }

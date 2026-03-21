@@ -1,0 +1,13 @@
+[package]
+name = "pse-topology"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Laplacian computation, spectral decomposition, Fiedler vector, Betti numbers for PSE"
+
+[dependencies]
+pse-types = { path = "../pse-types" }
+pse-graph = { path = "../pse-graph" }
+nalgebra = { workspace = true }
+serde = { workspace = true }

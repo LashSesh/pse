@@ -1,0 +1,16 @@
+[package]
+name = "pse-manifest"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Manifest construction and verification for PSE"
+
+[dependencies]
+pse-types = { path = "../pse-types" }
+pse-evidence = { path = "../pse-evidence" }
+pse-registry = { path = "../pse-registry" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+thiserror = { workspace = true }
