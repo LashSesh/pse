@@ -1,0 +1,16 @@
+[package]
+name = "pse-navigator"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "TRITON golden-angle spiral, SimplexMesh, spectral-guided exploration for PSE"
+
+[dependencies]
+pse-topology = { path = "../pse-topology" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[features]
+default = []
+triton = []

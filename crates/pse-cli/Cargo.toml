@@ -1,0 +1,33 @@
+[package]
+name = "pse-cli"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "PSE command line interface"
+
+[[bin]]
+name = "pse"
+path = "src/main.rs"
+
+[dependencies]
+pse-types = { path = "../pse-types" }
+pse-core = { path = "../pse-core" }
+pse-evidence = { path = "../pse-evidence" }
+pse-graph = { path = "../pse-graph" }
+pse-registry = { path = "../pse-registry" }
+pse-manifest = { path = "../pse-manifest" }
+pse-capsule = { path = "../pse-capsule" }
+pse-scheduler = { path = "../pse-scheduler" }
+pse-store = { path = "../pse-store" }
+pse-topology = { path = "../pse-topology" }
+pse-scale = { path = "../pse-scale" }
+pse-pmhd = { path = "../pse-pmhd" }
+pse-navigator = { path = "../pse-navigator" }
+pse-gateway = { path = "../pse-gateway" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }

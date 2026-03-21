@@ -1,0 +1,12 @@
+[package]
+name = "pse-evidence"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Evidence chain construction, SHA-256 linking, crystal archival for PSE"
+
+[dependencies]
+pse-types = { path = "../pse-types" }
+serde = { workspace = true }
+thiserror = { workspace = true }

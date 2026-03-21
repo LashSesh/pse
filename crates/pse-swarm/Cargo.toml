@@ -1,0 +1,14 @@
+[package]
+name = "pse-swarm"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Multi-agent coordination, consensus modes, PMHD-backed verification for PSE"
+
+[dependencies]
+pse-types = { path = "../pse-types" }
+pse-pmhd = { path = "../pse-pmhd" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }

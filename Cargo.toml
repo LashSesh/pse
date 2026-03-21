@@ -1,0 +1,51 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/pse-types",
+    "crates/pse-core",
+    "crates/pse-graph",
+    "crates/pse-extract",
+    "crates/pse-cascade",
+    "crates/pse-replay",
+    "crates/pse-evidence",
+    "crates/pse-registry",
+    "crates/pse-manifest",
+    "crates/pse-capsule",
+    "crates/pse-scheduler",
+    "crates/pse-topology",
+    "crates/pse-store",
+    "crates/pse-scale",
+    "crates/pse-pmhd",
+    "crates/pse-navigator",
+    "crates/pse-constraint",
+    "crates/pse-swarm",
+    "crates/pse-gateway",
+    "crates/pse-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Sebastian Klemm"]
+license = "MIT"
+description = "Post-Symbolic Engine — universal computation through topology, physics, and geometry"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_jcs = "0.1"
+sha2 = "0.10"
+petgraph = "0.6"
+ordered-float = { version = "4", features = ["serde"] }
+nalgebra = "0.33"
+chrono = { version = "0.4", features = ["serde"] }
+thiserror = "2"
+tracing = "0.1"
+tokio = { version = "1", features = ["full"] }
+aes-gcm = "0.10"
+hkdf = "0.12"
+rusqlite = { version = "0.32", features = ["bundled"] }
+axum = { version = "0.8", features = ["ws"] }
+tower-http = { version = "0.6", features = ["cors"] }
+futures = "0.3"
+tower = { version = "0.5", features = ["util"] }

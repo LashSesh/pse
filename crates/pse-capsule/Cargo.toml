@@ -1,0 +1,22 @@
+[package]
+name = "pse-capsule"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "AES-256-GCM encryption, HKDF key derivation, policy-gated encapsulation for PSE"
+
+[dependencies]
+pse-types = { path = "../pse-types" }
+pse-manifest = { path = "../pse-manifest" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+aes-gcm = { workspace = true }
+hkdf = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+pse-evidence = { path = "../pse-evidence" }
+pse-registry = { path = "../pse-registry" }

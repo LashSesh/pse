@@ -1,0 +1,24 @@
+[package]
+name = "pse-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "DomainAdapter trait and Engine orchestrator for PSE"
+
+[dependencies]
+pse-types = { path = "../pse-types" }
+pse-graph = { path = "../pse-graph" }
+pse-extract = { path = "../pse-extract" }
+pse-cascade = { path = "../pse-cascade" }
+pse-evidence = { path = "../pse-evidence" }
+pse-constraint = { path = "../pse-constraint" }
+pse-registry = { path = "../pse-registry" }
+pse-manifest = { path = "../pse-manifest" }
+pse-scheduler = { path = "../pse-scheduler" }
+pse-topology = { path = "../pse-topology" }
+pse-scale = { path = "../pse-scale" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
