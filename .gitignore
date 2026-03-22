@@ -1,7 +1,11 @@
 /target
 Cargo.lock
+*.db
+*.db-journal
+bench_results.json
 *.swp
 *.swo
 *~
 .DS_Store
+Thumbs.db
 *.zip

@@ -6,9 +6,10 @@ physics, and geometry rather than through symbols or statistics.
 ## What It Is
 
 PSE observes data streams, detects invariant patterns through Kuramoto phase
-synchronization, validates them through an adversarial falsification cascade,
-and crystallizes survivors as cryptographically anchored, deterministically
-reproducible artifacts.
+synchronization, validates them through an 8-gate adversarial falsification
+cascade, and crystallizes survivors as cryptographically anchored,
+deterministically reproducible artifacts. It accumulates knowledge over time
+through progressive convergence — no subscriptions, no cloud dependency.
 
 It is domain-agnostic. Financial markets, medical diagnostics, cybersecurity,
 industrial sensors, climate data — any domain that produces observable data
@@ -23,7 +24,47 @@ streams can use PSE by implementing a thin adapter trait.
 - **Convergence, not subscription**: Progressive offline capability via pattern accumulation
 - **Constitution, not configuration**: ADAMANT Protocol (21 machine-verifiable axioms)
 
+## Benchmarks
+
+Measured on Intel Core i3 (2 cores / 4 threads, 2.1 GHz), 8 GB RAM, Windows.
+No GPU. No cluster. No cloud.
+
+| ID | Benchmark | Value | Unit |
+|----|-----------|-------|------|
+| B01a | Observe throughput | 655,115 | obs/sec |
+| B01b | Full 15-stage pipeline | 9,695 | cycles/sec |
+| B02 | Crystal serialization | 52.4 | µs/crystal |
+| B03 | Evidence verification | 5.5 | µs/verify |
+| B05 | Determinism check | PASS | 58 crystals, bit-identical |
+| B06 | Laplacian (200 nodes) | 6.9 | ms |
+| B07 | Fiedler vector | 130 | µs |
+| B08 | Kuramoto convergence | 3.6 | ms (18 ticks, r=0.95) |
+| B09 | Navigator step (TRITON) | 148 | µs/step |
+| B10 | Constraint propagation | 12.7 | µs/component |
+| B11 | Memory (5K entities) | 2.4 | MB |
+| B12 | Capsule (AES-256-GCM) | 9.6 | µs/roundtrip |
+| B13 | Registry lookup | 0.16 | µs |
+| B14 | Swarm consensus (4 agents) | 0.05 | ms |
+| B15 | Full macro-step | 4.3 | ms |
+
+Run benchmarks yourself:
+
+```bash
+cargo run --release --example bench_full
+```
+
 ## Quick Start
+
+```bash
+# Build
+cargo build --release
+
+# Run benchmarks
+cargo run --release --example bench_full
+
+# Run synthetic scenario (58 crystals from 200 ticks)
+cargo run --release --example synthetic
+```
 
 ```rust
 use pse_core::{GlobalState, macro_step};
@@ -41,70 +82,45 @@ if let Ok(Some(crystal)) = macro_step(&mut state, &batch, &config, &adapter) {
 }
 ```
 
-## Performance
+## Domain Adapter
 
-Measured on Intel Core i3 (2C/4T, 2.1 GHz), 8 GB RAM, no GPU.
-Run: `cargo run --release --example bench_full`
+PSE is domain-agnostic. Implement the `DomainAdapter` trait to connect any
+data source:
 
-### Throughput
+```rust
+use pse_core::DomainAdapter;
 
-| Benchmark | Result | What it measures |
-|-----------|--------|------------------|
-| B01a observe | 644,521 obs/sec | Canonicalize + SHA-256 + graph persist |
-| B01b pipeline | 9,116 cycles/sec | Full 15-stage macro\_step |
+struct MyFinanceAdapter;
 
-### Crystallization
-
-| Benchmark | Result | What it measures |
-|-----------|--------|------------------|
-| B02 serialize | 54.7 µs/crystal | JSON round-trip (serialize + deserialize) |
-| B03 evidence | 5.5 µs/verify | Content address + hash chain + gate check |
-| B05 determinism | PASS (58 crystals) | Two identical runs produce identical crystal IDs |
-
-### Topology
-
-| Benchmark | Result | What it measures |
-|-----------|--------|------------------|
-| B06 laplacian | 14.5 ms | Eigendecomposition of 200-node graph |
-| B07 fiedler | 12.7 ms | Fiedler vector extraction (k=2) |
-| B08 kuramoto | 3.6 ms, 18 ticks, r=0.95 | Phase synchronization convergence |
-| B09 navigator | 218 µs/step | TRITON golden-angle spiral exploration |
-
-### Constraint + Memory
-
-| Benchmark | Result | What it measures |
-|-----------|--------|------------------|
-| B10 constraint | 13 µs/component | Morphogenic pressure + mutation |
-| B11 memory | 2.4 MB | Graph footprint for 5,000 entities |
-
-### Crypto + Infrastructure
-
-| Benchmark | Result | What it measures |
-|-----------|--------|------------------|
-| B12 capsule | 9.2 µs | AES-256-GCM seal + open round-trip |
-| B13 registry | 0.16 µs | Content-addressed operator lookup |
-| B14 swarm | 0.05 ms | 4-agent consensus (1 round) |
-| B15 macro\_step | 2.7 ms | Single end-to-end tick (gate rejection) |
+impl DomainAdapter for MyFinanceAdapter {
+    fn domain_name(&self) -> &str { "financial" }
+}
+```
 
 ## Architecture
 
 ```
-PSE (20 crates)
-├── Observation Layer:  pse-graph, pse-scale (Kuramoto, multi-scale)
-├── Analysis Layer:     pse-extract, pse-topology (Laplacian, Fiedler, Betti)
-├── Validation Layer:   pse-cascade, pse-pmhd (8-gate falsification)
-├── Crystallization:    pse-types, pse-evidence, pse-registry, pse-manifest
-├── Exploration:        pse-navigator (TRITON golden-angle, SimplexMesh)
-├── Coordination:       pse-swarm (multi-agent consensus)
-├── Constraint:         pse-constraint (DoF analysis, pre-computation routing)
-├── Infrastructure:     pse-store, pse-capsule, pse-scheduler, pse-replay
-└── Interface:          pse-gateway, pse-cli
+PSE (20 crates, 152 tests)
+├── Observation:     pse-graph, pse-scale (Kuramoto, multi-scale)
+├── Analysis:        pse-extract, pse-topology (Laplacian, Fiedler, Betti)
+├── Validation:      pse-cascade, pse-pmhd (8-gate adversarial falsification)
+├── Crystallization: pse-types, pse-evidence, pse-registry, pse-manifest
+├── Exploration:     pse-navigator (TRITON golden-angle spiral, SimplexMesh)
+├── Coordination:    pse-swarm (multi-agent consensus)
+├── Constraint:      pse-constraint (degrees-of-freedom analysis)
+├── Infrastructure:  pse-store, pse-capsule, pse-scheduler, pse-replay
+├── Interface:       pse-gateway, pse-cli
+└── Core:            pse-core (DomainAdapter trait, Engine)
 ```
 
 ## Derived From
 
 PSE is extracted from ISLS (Intelligent Semantic Ledger Substrate).
 Constitutional governance: ADAMANT Protocol (Zenodo, CC BY 4.0).
+
+## Author
+
+Sebastian Klemm
 
 ## License
 
