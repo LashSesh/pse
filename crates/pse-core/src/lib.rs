@@ -99,6 +99,8 @@ pub struct GlobalState {
     pub last_gate_passed: bool,
     /// C18 multi-scale state (Micro/Meso/Macro universes and bridges).
     pub scale_state: pse_scale::MultiScaleState,
+    /// Count of pattern-memory hits (regions that matched existing crystals).
+    pub pattern_hits: u64,
 }
 
 impl GlobalState {
@@ -122,6 +124,7 @@ impl GlobalState {
             last_constraint_count: 0,
             last_gate_passed: false,
             scale_state: pse_scale::MultiScaleState::default(),
+            pattern_hits: 0,
         }
     }
 }
@@ -360,6 +363,26 @@ pub fn macro_step(
     eprintln!("tick {}: extracted {} constraints, {} region vertices, graph has {} vertices {} edges",
               state.commit_index, program.len(), region.len(),
               state.graph.graph.node_count(), state.graph.graph.edge_count());
+
+    // Pattern memory shortcut: if the extracted region overlaps substantially
+    // with an existing crystal's region, skip the full cascade validation.
+    // This is the core accumulation mechanism — known patterns are recognized
+    // cheaply instead of re-validated expensively.
+    if !region.is_empty() {
+        let dominated = state.archive.crystals().iter().any(|c| {
+            if c.region.is_empty() {
+                return false;
+            }
+            let overlap = region.iter().filter(|v| c.region.contains(v)).count();
+            let coverage = overlap as f64 / region.len().max(1) as f64;
+            coverage >= 0.7
+        });
+        if dominated {
+            state.pattern_hits += 1;
+            state.engine_state = EngineState::Idle;
+            return Ok(None);
+        }
+    }
 
     // Operators: projection
     state.engine_state = EngineState::Projecting;

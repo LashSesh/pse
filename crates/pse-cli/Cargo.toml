@@ -25,6 +25,9 @@ pse-scale = { path = "../pse-scale" }
 pse-pmhd = { path = "../pse-pmhd" }
 pse-navigator = { path = "../pse-navigator" }
 pse-gateway = { path = "../pse-gateway" }
+pse-constraint = { path = "../pse-constraint" }
+pse-adapter-binance = { path = "../../adapters/pse-adapter-binance" }
+pse-adapter-entsoe = { path = "../../adapters/pse-adapter-entsoe" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 chrono = { workspace = true }
