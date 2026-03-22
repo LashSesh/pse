@@ -1,0 +1,24 @@
+{
+  "platform": {
+    "arch": "x86_64",
+    "os": "linux"
+  },
+  "results": {
+    "B01_ingestion_throughput": {
+      "crystals": 58,
+      "unit": "obs/sec",
+      "value": 522869.25549692445
+    },
+    "B02_crystal_serialization": {
+      "unit": "µs/crystal",
+      "value": 43.805
+    },
+    "B03_evidence_verification": {
+      "unit": "µs/verify",
+      "value": 1.428
+    }
+  },
+  "suite": "PSE Benchmark Suite",
+  "timestamp": "2026-03-22T15:02:32.886888648+00:00",
+  "version": "0.1.0"
+}
