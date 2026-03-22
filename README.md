@@ -64,6 +64,11 @@ cargo run --release --example bench_full
 
 # Run synthetic scenario (58 crystals from 200 ticks)
 cargo run --release --example synthetic
+
+# Run a domain adapter (offline, embedded data)
+cargo run --release -p pse-adapter-weather --example weather -- --offline
+cargo run --release -p pse-adapter-binance --example observe_btc -- --offline
+cargo run --release -p pse-adapter-seismo --example seismo -- --offline
 ```
 
 ```rust
@@ -82,25 +87,42 @@ if let Ok(Some(crystal)) = macro_step(&mut state, &batch, &config, &adapter) {
 }
 ```
 
-## Domain Adapter
+## Domain Adapters
 
-PSE is domain-agnostic. Implement the `DomainAdapter` trait to connect any
-data source:
+PSE is domain-agnostic. Implement the `ObservationAdapter` and `DomainAdapter`
+traits to connect any data source. Ten adapters ship out of the box:
+
+| Adapter | Domain | Data Source |
+|---------|--------|-------------|
+| `pse-adapter-airquality` | Air Quality | OpenAQ monitoring stations |
+| `pse-adapter-binance` | Crypto Markets | Binance REST API (OHLCV) |
+| `pse-adapter-entsoe` | Energy Grid | ENTSO-E Transparency Platform |
+| `pse-adapter-iot` | Predictive Maintenance | Industrial machinery sensors |
+| `pse-adapter-modelmon` | ML Monitoring | Model inference drift detection |
+| `pse-adapter-seismo` | Seismology | USGS Earthquake API |
+| `pse-adapter-syslog` | Security / Ops | Syslog anomaly detection |
+| `pse-adapter-tabular` | Data Quality | CSV / tabular analysis |
+| `pse-adapter-vitals` | Medical Vitals | ECG / vital signs monitoring |
+| `pse-adapter-weather` | Weather | Open-Meteo API |
+
+Every adapter includes embedded sample data so it can run fully offline.
+
+Writing your own adapter is minimal:
 
 ```rust
 use pse_core::DomainAdapter;
 
-struct MyFinanceAdapter;
+struct MyAdapter;
 
-impl DomainAdapter for MyFinanceAdapter {
-    fn domain_name(&self) -> &str { "financial" }
+impl DomainAdapter for MyAdapter {
+    fn domain_name(&self) -> &str { "my-domain" }
 }
 ```
 
 ## Architecture
 
 ```
-PSE (20 crates, 152 tests)
+PSE (31 crates, 232 tests)
 ├── Observation:     pse-graph, pse-scale (Kuramoto, multi-scale)
 ├── Analysis:        pse-extract, pse-topology (Laplacian, Fiedler, Betti)
 ├── Validation:      pse-cascade, pse-pmhd (8-gate adversarial falsification)
@@ -110,7 +132,9 @@ PSE (20 crates, 152 tests)
 ├── Constraint:      pse-constraint (degrees-of-freedom analysis)
 ├── Infrastructure:  pse-store, pse-capsule, pse-scheduler, pse-replay
 ├── Interface:       pse-gateway, pse-cli
-└── Core:            pse-core (DomainAdapter trait, Engine)
+├── Core:            pse-core (DomainAdapter trait, Engine), pse (meta-crate)
+└── Adapters (10):   airquality, binance, entsoe, iot, modelmon,
+                     seismo, syslog, tabular, vitals, weather
 ```
 
 ## Derived From
