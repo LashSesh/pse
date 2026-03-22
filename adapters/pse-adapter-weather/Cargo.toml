@@ -1,0 +1,17 @@
+[package]
+name = "pse-adapter-weather"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "PSE domain adapter for Open-Meteo weather data"
+
+[dependencies]
+pse-types = { path = "../../crates/pse-types" }
+pse-core = { path = "../../crates/pse-core" }
+pse-graph = { path = "../../crates/pse-graph" }
+reqwest = { version = "0.12", features = ["json"] }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = "1"

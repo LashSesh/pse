@@ -1,0 +1,29 @@
+[package]
+name = "pse"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Post-Symbolic Engine — universal computation through topology, physics, and geometry"
+keywords = ["post-symbolic", "topology", "kuramoto", "crystallization", "analytics"]
+categories = ["science", "algorithms", "data-structures"]
+
+[dependencies]
+pse-types = { path = "../pse-types" }
+pse-core = { path = "../pse-core" }
+pse-graph = { path = "../pse-graph" }
+pse-extract = { path = "../pse-extract" }
+pse-cascade = { path = "../pse-cascade" }
+pse-evidence = { path = "../pse-evidence" }
+pse-registry = { path = "../pse-registry" }
+pse-topology = { path = "../pse-topology" }
+pse-scale = { path = "../pse-scale" }
+pse-navigator = { path = "../pse-navigator" }
+pse-constraint = { path = "../pse-constraint" }
+pse-swarm = { path = "../pse-swarm" }
+pse-store = { path = "../pse-store" }
+pse-capsule = { path = "../pse-capsule" }
+pse-scheduler = { path = "../pse-scheduler" }
+pse-replay = { path = "../pse-replay" }
+pse-manifest = { path = "../pse-manifest" }
+pse-pmhd = { path = "../pse-pmhd" }

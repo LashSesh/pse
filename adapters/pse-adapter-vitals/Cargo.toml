@@ -1,0 +1,15 @@
+[package]
+name = "pse-adapter-vitals"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "PSE domain adapter for heartbeat and vital signs monitoring"
+
+[dependencies]
+pse-types = { path = "../../crates/pse-types" }
+pse-core = { path = "../../crates/pse-core" }
+pse-graph = { path = "../../crates/pse-graph" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = "1"
