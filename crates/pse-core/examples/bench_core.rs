@@ -7,15 +7,16 @@ use std::time::Instant;
 
 use pse_core::{macro_step, GlobalState};
 use pse_evidence::verify_crystal;
+use pse_graph::{ingest, PassthroughAdapter};
 use pse_replay::compare_crystal_sequences;
-use pse_types::{Config, RunDescriptor, SchedulerConfig, SemanticCrystal};
-use pse_graph::PassthroughAdapter;
+use pse_types::{Config, MeasurementContext, RunDescriptor, SchedulerConfig, SemanticCrystal};
 
 fn main() {
     println!("PSE Benchmark Suite v0.1.0");
     println!("==========================\n");
 
-    let crystals_b01 = bench_b01_ingestion();
+    bench_b01a_observe_only();
+    let crystals_b01 = bench_b01b_full_pipeline();
     bench_b02_crystal_serialization(&crystals_b01);
     bench_b03_evidence_verification(&crystals_b01);
     bench_b04_replay_speed();
@@ -78,9 +79,67 @@ fn build_obs_batches(n_entities: usize, n_ticks: usize) -> Vec<Vec<Vec<u8>>> {
         .collect()
 }
 
-// ─── B01: Ingestion Throughput ───────────────────────────────────────────────
+// ─── B01a: Observe Only (canonicalize + graph persist, NO tick/crystallize) ──
 
-fn bench_b01_ingestion() -> Vec<SemanticCrystal> {
+fn bench_b01a_observe_only() {
+    let n_entities = 50;
+    let n_ticks = 200;
+    let config = Config::default();
+    let adapter = PassthroughAdapter::new("bench");
+    let ctx = MeasurementContext::default();
+
+    // Pre-build all payloads so we don't measure JSON serialization
+    let all_batches: Vec<Vec<Vec<u8>>> = (0..n_ticks)
+        .map(|tick| {
+            (0..n_entities)
+                .map(|entity| {
+                    let value = ((tick as f64 * 0.1) + (entity as f64 * 0.2)).sin();
+                    let payload = serde_json::json!({
+                        "entity": format!("sensor_{:03}", entity),
+                        "value": value,
+                        "tick": tick,
+                        "phase": (tick as f64 * 0.05 + entity as f64 * 0.1)
+                            % std::f64::consts::TAU,
+                    });
+                    serde_json::to_vec(&payload).unwrap()
+                })
+                .collect()
+        })
+        .collect();
+
+    let mut graph = pse_graph::PersistentGraph::new();
+
+    let start = Instant::now();
+    for batch in &all_batches {
+        // L0: canonicalize each raw payload -> Observation (SHA-256 digest)
+        let mut canonical: Vec<pse_types::Observation> = Vec::with_capacity(batch.len());
+        for raw in batch {
+            let obs = ingest(&adapter, raw, &ctx).unwrap();
+            canonical.push(obs);
+        }
+        // L1: persist into graph (upsert vertex, edges, embeddings)
+        graph
+            .apply_observations(&canonical, &config.persistence)
+            .unwrap();
+    }
+    let elapsed = start.elapsed();
+
+    let total_obs = (n_entities * n_ticks) as f64;
+    let obs_per_sec = total_obs / elapsed.as_secs_f64();
+
+    println!(
+        "B01a observe_only: {:.0} obs/sec ({} obs in {:.4}s, graph: {} vertices {} edges)",
+        obs_per_sec,
+        total_obs as u64,
+        elapsed.as_secs_f64(),
+        graph.graph.node_count(),
+        graph.graph.edge_count(),
+    );
+}
+
+// ─── B01b: Full Pipeline (observe + tick + crystallize) ─────────────────────
+
+fn bench_b01b_full_pipeline() -> Vec<SemanticCrystal> {
     let n_entities = 50;
     let n_ticks = 200;
     let config = Config::default();
@@ -93,7 +152,7 @@ fn bench_b01_ingestion() -> Vec<SemanticCrystal> {
     let obs_per_sec = total_obs / elapsed.as_secs_f64();
 
     println!(
-        "B01 ingestion_throughput: {:.0} obs/sec ({} crystals from {} obs in {:.2}s)",
+        "B01b full_pipeline: {:.0} obs/sec ({} crystals from {} obs in {:.4}s)",
         obs_per_sec,
         crystals.len(),
         total_obs as u64,
