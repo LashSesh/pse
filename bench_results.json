@@ -4,21 +4,88 @@
     "os": "linux"
   },
   "results": {
-    "B01_ingestion_throughput": {
-      "crystals": 58,
+    "B01a_observe_only": {
+      "detail": "10000 obs, 1 vertices",
       "unit": "obs/sec",
-      "value": 522869.25549692445
+      "value": 480412.0859574443
+    },
+    "B01b_full_pipeline": {
+      "detail": "58 crystals from 10000 obs",
+      "unit": "obs/sec",
+      "value": 322428.09506869764
     },
     "B02_crystal_serialization": {
+      "detail": "1000 iterations",
       "unit": "µs/crystal",
-      "value": 43.805
+      "value": 40.35
     },
     "B03_evidence_verification": {
+      "detail": "1000 iterations",
       "unit": "µs/verify",
-      "value": 1.428
+      "value": 2.505
+    },
+    "B04_replay_speed": {
+      "detail": "58 crystals",
+      "unit": "steps/sec",
+      "value": 7693.479764359486
+    },
+    "B05_determinism_check": {
+      "detail": "58 crystals, PASS",
+      "unit": "pass",
+      "value": 1.0
+    },
+    "B06_laplacian_computation": {
+      "detail": "n=200, rank=50",
+      "unit": "ms",
+      "value": 9.006609000000001
+    },
+    "B07_fiedler_vector": {
+      "detail": "dim=200, range=0.2496",
+      "unit": "µs",
+      "value": 8698.0
+    },
+    "B08_kuramoto_convergence": {
+      "detail": "500 ticks, r=0.0775",
+      "unit": "ms",
+      "value": 95.320698
+    },
+    "B09_navigator_step": {
+      "detail": "50 steps",
+      "unit": "µs/step",
+      "value": 157.78
+    },
+    "B10_constraint_propagation": {
+      "detail": "100% DoF=0",
+      "unit": "µs/component",
+      "value": 122.95
+    },
+    "B11_memory_scaling": {
+      "detail": "5000 entities, 50000 obs, ~2400216 bytes",
+      "unit": "ms",
+      "value": 111.466319
+    },
+    "B12_capsule_roundtrip": {
+      "detail": "1000 iterations",
+      "unit": "µs/roundtrip",
+      "value": 9.12
+    },
+    "B13_registry_lookup": {
+      "detail": "100 entries, 10000 lookups",
+      "unit": "µs/lookup",
+      "value": 0.0745
+    },
+    "B14_swarm_consensus": {
+      "detail": "4 members, 1 rounds, consensus=true",
+      "unit": "ms",
+      "value": 0.039358
+    },
+    "B15_full_macro_step": {
+      "detail": "REJECTED, 50 obs",
+      "unit": "µs",
+      "value": 99.0
     }
   },
   "suite": "PSE Benchmark Suite",
-  "timestamp": "2026-03-22T15:02:32.886888648+00:00",
+  "timestamp": "2026-03-22T15:28:08.156575026+00:00",
   "version": "0.1.0"
 }

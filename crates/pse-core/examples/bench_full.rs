@@ -8,7 +8,7 @@ use std::time::Instant;
 use pse_capsule::{seal, open, CapsulePolicy};
 use pse_core::{macro_step, GlobalState};
 use pse_evidence::{verify_crystal, Archive};
-use pse_graph::{PassthroughAdapter, PersistentGraph};
+use pse_graph::{ingest, PassthroughAdapter, PersistentGraph};
 use pse_manifest::build_manifest;
 use pse_navigator::{Navigator, NavigatorConfig, SpectralSignature};
 use pse_registry::{RegistryEntry, RegistryKind, RegistrySet};
@@ -17,7 +17,17 @@ use pse_swarm::{AgentGoal, ConsensusMode, Swarm, SwarmPolicy};
 use pse_topology::{
     compute_laplacian, init_kuramoto_state, kuramoto_step, spectral_decompose, TopologyConfig,
 };
-use pse_types::{Config, FiveDState, RunDescriptor, SchedulerConfig, SemanticCrystal};
+use pse_types::{
+    Config, FiveDState, MeasurementContext, RunDescriptor, SchedulerConfig, SemanticCrystal,
+};
+
+/// Collected benchmark result for JSON output.
+struct BenchResult {
+    key: &'static str,
+    value: f64,
+    unit: &'static str,
+    detail: String,
+}
 
 fn main() {
     print_platform_header();
@@ -25,12 +35,16 @@ fn main() {
     println!("PSE Benchmark Suite v0.1.0 — Full");
     println!("==================================\n");
 
+    let mut results: Vec<BenchResult> = Vec::new();
+
     // Phase 1: Core
-    let crystals_b01 = bench_b01_ingestion();
-    bench_b02_crystal_serialization(&crystals_b01);
-    bench_b03_evidence_verification(&crystals_b01);
-    bench_b04_replay_speed();
-    bench_b05_determinism();
+    results.push(bench_b01a_observe_only());
+    let (crystals, r) = bench_b01b_full_pipeline();
+    results.push(r);
+    results.push(bench_b02_crystal_serialization(&crystals));
+    results.push(bench_b03_evidence_verification(&crystals));
+    results.push(bench_b04_replay_speed());
+    results.push(bench_b05_determinism());
 
     println!();
 
@@ -41,25 +55,27 @@ fn main() {
         graph.graph.node_count(),
         graph.graph.edge_count()
     );
-    bench_b06_laplacian(&graph);
-    bench_b07_fiedler(&graph);
-    bench_b08_kuramoto(&graph);
-    bench_b09_navigator_step();
-    bench_b10_constraint_propagation();
+    results.push(bench_b06_laplacian(&graph));
+    results.push(bench_b07_fiedler(&graph));
+    results.push(bench_b08_kuramoto(&graph));
+    results.push(bench_b09_navigator_step());
+    results.push(bench_b10_constraint_propagation());
 
     println!();
 
     // Phase 3: Extended
-    bench_b11_memory_scaling();
-    bench_b12_capsule_roundtrip();
-    bench_b13_registry_lookup();
-    bench_b14_swarm_consensus();
-    bench_b15_full_macro_step();
+    results.push(bench_b11_memory_scaling());
+    results.push(bench_b12_capsule_roundtrip());
+    results.push(bench_b13_registry_lookup());
+    results.push(bench_b14_swarm_consensus());
+    results.push(bench_b15_full_macro_step());
+
+    println!();
+
+    // Write JSON
+    write_results_json(&results);
 
     println!("\nDone.");
-
-    // Write JSON results
-    write_results_json();
 }
 
 // ─── Platform Header ─────────────────────────────────────────────────────────
@@ -186,10 +202,52 @@ fn build_topo_graph(n_nodes: usize, n_edges: usize) -> PersistentGraph {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Phase 1: Core Benchmarks (B01–B05)
+// Phase 1: Core Benchmarks (B01a, B01b, B02–B05)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-fn bench_b01_ingestion() -> Vec<SemanticCrystal> {
+fn bench_b01a_observe_only() -> BenchResult {
+    let n_entities = 50;
+    let n_ticks = 200;
+    let config = Config::default();
+    let adapter = PassthroughAdapter::new("bench");
+    let ctx = MeasurementContext::default();
+
+    let all_batches = build_obs_batches(n_entities, n_ticks);
+    let mut graph = PersistentGraph::new();
+
+    let start = Instant::now();
+    for batch in &all_batches {
+        let mut canonical: Vec<pse_types::Observation> = Vec::with_capacity(batch.len());
+        for raw in batch {
+            canonical.push(ingest(&adapter, raw, &ctx).unwrap());
+        }
+        graph
+            .apply_observations(&canonical, &config.persistence)
+            .unwrap();
+    }
+    let elapsed = start.elapsed();
+
+    let total_obs = (n_entities * n_ticks) as f64;
+    let obs_per_sec = total_obs / elapsed.as_secs_f64();
+
+    println!(
+        "B01a observe_only: {:.0} obs/sec ({} obs in {:.4}s, graph: {} vertices {} edges)",
+        obs_per_sec,
+        total_obs as u64,
+        elapsed.as_secs_f64(),
+        graph.graph.node_count(),
+        graph.graph.edge_count(),
+    );
+
+    BenchResult {
+        key: "B01a_observe_only",
+        value: obs_per_sec,
+        unit: "obs/sec",
+        detail: format!("{} obs, {} vertices", total_obs as u64, graph.graph.node_count()),
+    }
+}
+
+fn bench_b01b_full_pipeline() -> (Vec<SemanticCrystal>, BenchResult) {
     let n_entities = 50;
     let n_ticks = 200;
     let config = Config::default();
@@ -202,19 +260,29 @@ fn bench_b01_ingestion() -> Vec<SemanticCrystal> {
     let obs_per_sec = total_obs / elapsed.as_secs_f64();
 
     println!(
-        "B01 ingestion_throughput: {:.0} obs/sec ({} crystals from {} obs in {:.2}s)",
+        "B01b full_pipeline: {:.0} obs/sec ({} crystals from {} obs in {:.4}s)",
         obs_per_sec,
         crystals.len(),
         total_obs as u64,
         elapsed.as_secs_f64()
     );
-    crystals
+
+    let r = BenchResult {
+        key: "B01b_full_pipeline",
+        value: obs_per_sec,
+        unit: "obs/sec",
+        detail: format!("{} crystals from {} obs", crystals.len(), total_obs as u64),
+    };
+    (crystals, r)
 }
 
-fn bench_b02_crystal_serialization(crystals: &[SemanticCrystal]) {
+fn bench_b02_crystal_serialization(crystals: &[SemanticCrystal]) -> BenchResult {
     if crystals.is_empty() {
         println!("B02 crystal_serialization: SKIPPED (no crystals produced)");
-        return;
+        return BenchResult {
+            key: "B02_crystal_serialization", value: 0.0,
+            unit: "µs/crystal", detail: "SKIPPED".into(),
+        };
     }
 
     let crystal = &crystals[0];
@@ -226,17 +294,23 @@ fn bench_b02_crystal_serialization(crystals: &[SemanticCrystal]) {
         let _: SemanticCrystal = serde_json::from_slice(&json).unwrap();
     }
     let elapsed = start.elapsed();
+    let us = elapsed.as_micros() as f64 / iterations as f64;
 
-    println!(
-        "B02 crystal_serialization: {:.1} µs/crystal",
-        elapsed.as_micros() as f64 / iterations as f64
-    );
+    println!("B02 crystal_serialization: {:.1} µs/crystal", us);
+
+    BenchResult {
+        key: "B02_crystal_serialization", value: us,
+        unit: "µs/crystal", detail: format!("{} iterations", iterations),
+    }
 }
 
-fn bench_b03_evidence_verification(crystals: &[SemanticCrystal]) {
+fn bench_b03_evidence_verification(crystals: &[SemanticCrystal]) -> BenchResult {
     if crystals.is_empty() {
         println!("B03 evidence_verification: SKIPPED (no crystals produced)");
-        return;
+        return BenchResult {
+            key: "B03_evidence_verification", value: 0.0,
+            unit: "µs/verify", detail: "SKIPPED".into(),
+        };
     }
 
     let crystal = &crystals[0];
@@ -248,14 +322,17 @@ fn bench_b03_evidence_verification(crystals: &[SemanticCrystal]) {
         let _ = verify_crystal(crystal, &pinned);
     }
     let elapsed = start.elapsed();
+    let us = elapsed.as_micros() as f64 / iterations as f64;
 
-    println!(
-        "B03 evidence_verification: {:.1} µs/verify",
-        elapsed.as_micros() as f64 / iterations as f64
-    );
+    println!("B03 evidence_verification: {:.1} µs/verify", us);
+
+    BenchResult {
+        key: "B03_evidence_verification", value: us,
+        unit: "µs/verify", detail: format!("{} iterations", iterations),
+    }
 }
 
-fn bench_b04_replay_speed() {
+fn bench_b04_replay_speed() -> BenchResult {
     let n_entities = 50;
     let n_ticks = 200;
     let config = Config::default();
@@ -276,15 +353,20 @@ fn bench_b04_replay_speed() {
     let elapsed = start.elapsed();
 
     let crystal_count = results.iter().filter(|r| r.is_some()).count();
+    let steps_per_sec = n_ticks as f64 / elapsed.as_secs_f64();
+
     println!(
         "B04 replay_speed: {:.0} steps/sec ({} crystals in {:.2}s)",
-        n_ticks as f64 / elapsed.as_secs_f64(),
-        crystal_count,
-        elapsed.as_secs_f64()
+        steps_per_sec, crystal_count, elapsed.as_secs_f64()
     );
+
+    BenchResult {
+        key: "B04_replay_speed", value: steps_per_sec,
+        unit: "steps/sec", detail: format!("{} crystals", crystal_count),
+    }
 }
 
-fn bench_b05_determinism() {
+fn bench_b05_determinism() -> BenchResult {
     let config = Config::default();
     let crystals_a = run_scenario(&config, 50, 200);
     let crystals_b = run_scenario(&config, 50, 200);
@@ -303,34 +385,46 @@ fn bench_b05_determinism() {
             mismatches, result.crystal_count
         );
     }
+
+    BenchResult {
+        key: "B05_determinism_check",
+        value: if result.deterministic { 1.0 } else { 0.0 },
+        unit: "pass",
+        detail: format!("{} crystals, {}", result.crystal_count,
+            if result.deterministic { "PASS" } else { "FAIL" }),
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Phase 2: Topology Benchmarks (B06–B10)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-fn bench_b06_laplacian(graph: &PersistentGraph) {
+fn bench_b06_laplacian(graph: &PersistentGraph) -> BenchResult {
     let start = Instant::now();
     let laplacian = compute_laplacian(graph);
     let topo_config = TopologyConfig::default();
     let decomp = spectral_decompose(&laplacian, topo_config.spectral_k_max);
     let elapsed = start.elapsed();
+    let ms = elapsed.as_secs_f64() * 1000.0;
 
     println!(
         "B06 laplacian_computation: {:.1} ms (n={}, rank={}, gap={:.4})",
-        elapsed.as_secs_f64() * 1000.0,
-        laplacian.n,
-        decomp.truncation_rank,
-        decomp.spectral_gap,
+        ms, laplacian.n, decomp.truncation_rank, decomp.spectral_gap,
     );
+
+    BenchResult {
+        key: "B06_laplacian_computation", value: ms,
+        unit: "ms", detail: format!("n={}, rank={}", laplacian.n, decomp.truncation_rank),
+    }
 }
 
-fn bench_b07_fiedler(graph: &PersistentGraph) {
+fn bench_b07_fiedler(graph: &PersistentGraph) -> BenchResult {
     let laplacian = compute_laplacian(graph);
 
     let start = Instant::now();
     let decomp = spectral_decompose(&laplacian, 2);
     let elapsed = start.elapsed();
+    let us = elapsed.as_micros() as f64;
 
     let fiedler_len = decomp.fiedler_vector.len();
     let fiedler_range = if !decomp.fiedler_vector.is_empty() {
@@ -343,16 +437,22 @@ fn bench_b07_fiedler(graph: &PersistentGraph) {
 
     println!(
         "B07 fiedler_vector: {:.1} µs (dim={}, range={:.4})",
-        elapsed.as_micros() as f64,
-        fiedler_len,
-        fiedler_range,
+        us, fiedler_len, fiedler_range,
     );
+
+    BenchResult {
+        key: "B07_fiedler_vector", value: us,
+        unit: "µs", detail: format!("dim={}, range={:.4}", fiedler_len, fiedler_range),
+    }
 }
 
-fn bench_b08_kuramoto(graph: &PersistentGraph) {
+fn bench_b08_kuramoto(graph: &PersistentGraph) -> BenchResult {
     if graph.graph.node_count() < 2 {
         println!("B08 kuramoto_convergence: SKIPPED (graph too small)");
-        return;
+        return BenchResult {
+            key: "B08_kuramoto_convergence", value: 0.0,
+            unit: "ms", detail: "SKIPPED".into(),
+        };
     }
 
     let topo_config = TopologyConfig {
@@ -374,24 +474,28 @@ fn bench_b08_kuramoto(graph: &PersistentGraph) {
         }
     }
     let elapsed = start.elapsed();
+    let ms = elapsed.as_secs_f64() * 1000.0;
 
     match converged_tick {
         Some(t) => println!(
             "B08 kuramoto_convergence: {} ticks, {:.1} ms (r={:.4})",
-            t,
-            elapsed.as_secs_f64() * 1000.0,
-            kstate.order_parameter,
+            t, ms, kstate.order_parameter,
         ),
         None => println!(
             "B08 kuramoto_convergence: NOT CONVERGED in {} ticks, {:.1} ms (r={:.4})",
-            topo_config.kuramoto_steps,
-            elapsed.as_secs_f64() * 1000.0,
-            kstate.order_parameter,
+            topo_config.kuramoto_steps, ms, kstate.order_parameter,
         ),
+    }
+
+    BenchResult {
+        key: "B08_kuramoto_convergence", value: ms,
+        unit: "ms",
+        detail: format!("{} ticks, r={:.4}",
+            converged_tick.unwrap_or(topo_config.kuramoto_steps), kstate.order_parameter),
     }
 }
 
-fn bench_b09_navigator_step() {
+fn bench_b09_navigator_step() -> BenchResult {
     let nav_config = NavigatorConfig {
         dim: 5,
         seed: 42,
@@ -413,16 +517,20 @@ fn bench_b09_navigator_step() {
         navigator.step();
     }
     let elapsed = start.elapsed();
+    let us_per_step = elapsed.as_micros() as f64 / n_steps as f64;
 
     println!(
         "B09 navigator_step: {:.1} µs/step ({} steps, best_res={:.4})",
-        elapsed.as_micros() as f64 / n_steps as f64,
-        n_steps,
-        navigator.spiral.best_resonance(),
+        us_per_step, n_steps, navigator.spiral.best_resonance(),
     );
+
+    BenchResult {
+        key: "B09_navigator_step", value: us_per_step,
+        unit: "µs/step", detail: format!("{} steps", n_steps),
+    }
 }
 
-fn bench_b10_constraint_propagation() {
+fn bench_b10_constraint_propagation() -> BenchResult {
     let config = Config::default();
     let n_components = 20;
 
@@ -446,12 +554,18 @@ fn bench_b10_constraint_propagation() {
         }
     }
     let elapsed = start.elapsed();
+    let us_per_comp = elapsed.as_micros() as f64 / n_components as f64;
+    let pct_zero = (dof_zero as f64 / n_components as f64) * 100.0;
 
     println!(
         "B10 constraint_propagation: {:.1} µs/component, {:.0}% DoF=0",
-        elapsed.as_micros() as f64 / n_components as f64,
-        (dof_zero as f64 / n_components as f64) * 100.0,
+        us_per_comp, pct_zero,
     );
+
+    BenchResult {
+        key: "B10_constraint_propagation", value: us_per_comp,
+        unit: "µs/component", detail: format!("{:.0}% DoF=0", pct_zero),
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -460,14 +574,13 @@ fn bench_b10_constraint_propagation() {
 
 // ─── B11: Memory Scaling ─────────────────────────────────────────────────────
 
-fn bench_b11_memory_scaling() {
+fn bench_b11_memory_scaling() -> BenchResult {
     let n_entities = 5000;
     let config = Config::default();
     let mut state = GlobalState::new(&config);
     let adapter = PassthroughAdapter::new("memory_scale");
 
     let start = Instant::now();
-    // Feed observations for 10 ticks (5000 entities each)
     for tick in 0..10 {
         let mut batch = Vec::with_capacity(n_entities);
         for entity in 0..n_entities {
@@ -482,6 +595,7 @@ fn bench_b11_memory_scaling() {
         let _ = macro_step(&mut state, &batch, &config, &adapter);
     }
     let elapsed = start.elapsed();
+    let ms = elapsed.as_secs_f64() * 1000.0;
 
     let total_obs = n_entities * 10;
     let graph_mem = state.graph.estimate_heap_size();
@@ -489,17 +603,18 @@ fn bench_b11_memory_scaling() {
 
     println!(
         "B11 memory_scaling: {:.1} ms for {} entities ({} obs, {} crystals, graph ~{} bytes)",
-        elapsed.as_secs_f64() * 1000.0,
-        n_entities,
-        total_obs,
-        crystals,
-        graph_mem,
+        ms, n_entities, total_obs, crystals, graph_mem,
     );
+
+    BenchResult {
+        key: "B11_memory_scaling", value: ms,
+        unit: "ms", detail: format!("{} entities, {} obs, ~{} bytes", n_entities, total_obs, graph_mem),
+    }
 }
 
 // ─── B12: Capsule Roundtrip ──────────────────────────────────────────────────
 
-fn bench_b12_capsule_roundtrip() {
+fn bench_b12_capsule_roundtrip() -> BenchResult {
     let config = Config::default();
     let rd = RunDescriptor {
         config,
@@ -544,15 +659,18 @@ fn bench_b12_capsule_roundtrip() {
     }
     let elapsed = start.elapsed();
 
-    println!(
-        "B12 capsule_roundtrip: {:.1} µs/roundtrip",
-        elapsed.as_micros() as f64 / iterations as f64,
-    );
+    let us = elapsed.as_micros() as f64 / iterations as f64;
+    println!("B12 capsule_roundtrip: {:.1} µs/roundtrip", us);
+
+    BenchResult {
+        key: "B12_capsule_roundtrip", value: us,
+        unit: "µs/roundtrip", detail: format!("{} iterations", iterations),
+    }
 }
 
 // ─── B13: Registry Lookup ────────────────────────────────────────────────────
 
-fn bench_b13_registry_lookup() {
+fn bench_b13_registry_lookup() -> BenchResult {
     let mut registry = pse_registry::Registry::new(RegistryKind::Operator);
 
     // Register 100 operators
@@ -576,16 +694,18 @@ fn bench_b13_registry_lookup() {
     }
     let elapsed = start.elapsed();
 
-    println!(
-        "B13 registry_lookup: {:.1} µs/lookup ({} entries)",
-        elapsed.as_micros() as f64 / iterations as f64,
-        100,
-    );
+    let us = elapsed.as_micros() as f64 / iterations as f64;
+    println!("B13 registry_lookup: {:.1} µs/lookup ({} entries)", us, 100);
+
+    BenchResult {
+        key: "B13_registry_lookup", value: us,
+        unit: "µs/lookup", detail: format!("100 entries, {} lookups", iterations),
+    }
 }
 
 // ─── B14: Swarm Consensus ────────────────────────────────────────────────────
 
-fn bench_b14_swarm_consensus() {
+fn bench_b14_swarm_consensus() -> BenchResult {
     let goal = AgentGoal::new("discover structural invariants in time-series");
     let policy = SwarmPolicy {
         size: 4,
@@ -601,19 +721,24 @@ fn bench_b14_swarm_consensus() {
     let report = swarm.run();
     let elapsed = start.elapsed();
 
+    let ms = elapsed.as_secs_f64() * 1000.0;
     println!(
         "B14 swarm_consensus: {} members, {} rounds, {:.1} ms (consensus={}, resonance={:.4})",
-        report.swarm_size,
-        report.rounds_run,
-        elapsed.as_secs_f64() * 1000.0,
-        report.consensus_reached,
-        report.final_resonance,
+        report.swarm_size, report.rounds_run, ms,
+        report.consensus_reached, report.final_resonance,
     );
+
+    BenchResult {
+        key: "B14_swarm_consensus", value: ms,
+        unit: "ms",
+        detail: format!("{} members, {} rounds, consensus={}",
+            report.swarm_size, report.rounds_run, report.consensus_reached),
+    }
 }
 
 // ─── B15: Full Macro-Step ────────────────────────────────────────────────────
 
-fn bench_b15_full_macro_step() {
+fn bench_b15_full_macro_step() -> BenchResult {
     let config = Config::default();
     let mut state = GlobalState::new(&config);
     let adapter = PassthroughAdapter::new("full_step");
@@ -664,53 +789,34 @@ fn bench_b15_full_macro_step() {
         }
     };
 
+    let us = elapsed.as_micros() as f64;
     println!(
         "B15 full_macro_step: {:.1} µs ({}, {} obs)",
-        elapsed.as_micros() as f64,
-        crystal_str,
-        n_entities,
+        us, crystal_str, n_entities,
     );
+
+    BenchResult {
+        key: "B15_full_macro_step", value: us,
+        unit: "µs", detail: format!("{}, {} obs", crystal_str, n_entities),
+    }
 }
 
 // ─── JSON Output ─────────────────────────────────────────────────────────────
 
-fn write_results_json() {
-    // Re-run all benchmarks and collect structured results
-    // For efficiency, we use cached values from a quick re-run
-    let config = Config::default();
+fn write_results_json(results: &[BenchResult]) {
+    let mut result_map = serde_json::Map::new();
+    for r in results {
+        result_map.insert(
+            r.key.to_string(),
+            serde_json::json!({
+                "value": r.value,
+                "unit": r.unit,
+                "detail": r.detail,
+            }),
+        );
+    }
 
-    // Quick B01
-    let start = Instant::now();
-    let crystals = run_scenario(&config, 50, 200);
-    let b01_elapsed = start.elapsed();
-    let b01_obs_per_sec = 10000.0 / b01_elapsed.as_secs_f64();
-
-    // B02
-    let b02_us = if !crystals.is_empty() {
-        let crystal = &crystals[0];
-        let start = Instant::now();
-        for _ in 0..1000 {
-            let json = serde_json::to_vec(crystal).unwrap();
-            let _: SemanticCrystal = serde_json::from_slice(&json).unwrap();
-        }
-        start.elapsed().as_micros() as f64 / 1000.0
-    } else {
-        0.0
-    };
-
-    // B03
-    let b03_us = if !crystals.is_empty() {
-        let pinned: BTreeMap<String, String> = BTreeMap::new();
-        let start = Instant::now();
-        for _ in 0..1000 {
-            let _ = verify_crystal(&crystals[0], &pinned);
-        }
-        start.elapsed().as_micros() as f64 / 1000.0
-    } else {
-        0.0
-    };
-
-    let results = serde_json::json!({
+    let output = serde_json::json!({
         "suite": "PSE Benchmark Suite",
         "version": "0.1.0",
         "timestamp": chrono::Utc::now().to_rfc3339(),
@@ -718,27 +824,13 @@ fn write_results_json() {
             "os": std::env::consts::OS,
             "arch": std::env::consts::ARCH,
         },
-        "results": {
-            "B01_ingestion_throughput": {
-                "value": b01_obs_per_sec,
-                "unit": "obs/sec",
-                "crystals": crystals.len(),
-            },
-            "B02_crystal_serialization": {
-                "value": b02_us,
-                "unit": "µs/crystal",
-            },
-            "B03_evidence_verification": {
-                "value": b03_us,
-                "unit": "µs/verify",
-            },
-        }
+        "results": result_map,
     });
 
     std::fs::write(
         "bench_results.json",
-        serde_json::to_string_pretty(&results).unwrap(),
+        serde_json::to_string_pretty(&output).unwrap(),
     )
     .unwrap();
-    println!("\nResults written to bench_results.json");
+    println!("Results written to bench_results.json");
 }
