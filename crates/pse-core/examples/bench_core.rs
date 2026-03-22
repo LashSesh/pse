@@ -92,11 +92,25 @@ fn bench_b01a_diag() {
 
     // Pre-build payloads
     let all_batches = build_obs_batches(n_entities, n_ticks);
+    let total_obs = (n_entities * n_ticks) as f64;
+
+    // Bare SHA-256 baseline
+    {
+        use sha2::Digest;
+        let start = Instant::now();
+        for batch in &all_batches {
+            for raw in batch {
+                let _ = sha2::Sha256::digest(raw);
+            }
+        }
+        let bare = start.elapsed();
+        println!("  bare SHA-256:        {:>6.0} ns/obs", bare.as_nanos() as f64 / total_obs);
+    }
+
     let mut graph = pse_graph::PersistentGraph::new();
 
     let mut t_ingest: u128 = 0;
     let mut t_graph: u128 = 0;
-    let total_obs = (n_entities * n_ticks) as f64;
 
     let t_total_start = Instant::now();
     for batch in &all_batches {

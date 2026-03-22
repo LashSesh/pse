@@ -200,8 +200,12 @@ pub fn compute_laplacian(graph: &PersistentGraph) -> SparseLaplacian {
     SparseLaplacian { n, degree, adjacency }
 }
 
-/// Spectral decomposition via power iteration / Lanczos (K-truncated).
-/// For small n, uses dense symmetric eigendecomposition.
+/// Spectral decomposition via partial or full eigendecomposition.
+///
+/// When `k_max` is small relative to `n`, uses a partial decomposition
+/// (Lanczos-style with deflation) that is dramatically faster than
+/// computing all n eigenvalues. Falls back to full nalgebra SymmetricEigen
+/// when k_max > n/4 or n is small.
 #[allow(clippy::needless_range_loop)]
 pub fn spectral_decompose(laplacian: &SparseLaplacian, k_max: usize) -> SpectralDecomposition {
     let n = laplacian.n;
@@ -227,21 +231,38 @@ pub fn spectral_decompose(laplacian: &SparseLaplacian, k_max: usize) -> Spectral
     }
 
     let k = k_max.min(n);
-    // Build dense Laplacian matrix for eigendecomposition
-    let mut mat = vec![vec![0.0f64; n]; n];
-    for i in 0..n {
-        mat[i][i] = laplacian.degree[i];
-    }
-    for &(i, j, w) in &laplacian.adjacency {
-        mat[i][j] -= w;
-    }
 
-    // Use nalgebra for eigendecomposition (symmetric)
+    // For small k relative to n, partial decomposition is much faster.
+    // Threshold: if k <= n/4 and n > 30, use partial; otherwise full.
+    if k <= n / 4 && n > 30 {
+        spectral_decompose_partial(laplacian, k)
+    } else {
+        spectral_decompose_full(laplacian, k)
+    }
+}
+
+/// Full eigendecomposition using nalgebra SymmetricEigen. O(n³).
+#[allow(clippy::needless_range_loop)]
+fn spectral_decompose_full(laplacian: &SparseLaplacian, k: usize) -> SpectralDecomposition {
+    let n = laplacian.n;
     use nalgebra::{DMatrix, SymmetricEigen};
-    let na_mat = DMatrix::from_fn(n, n, |r, c| mat[r][c]);
+
+    let na_mat = DMatrix::from_fn(n, n, |r, c| {
+        if r == c {
+            laplacian.degree[r]
+        } else {
+            // Find adjacency weight for (r, c)
+            let mut w = 0.0;
+            for &(i, j, wt) in &laplacian.adjacency {
+                if i == r && j == c {
+                    w -= wt;
+                }
+            }
+            w
+        }
+    });
     let eig = SymmetricEigen::new(na_mat);
 
-    // Sort eigenvalues ascending
     let mut pairs: Vec<(f64, Vec<f64>)> = (0..n)
         .map(|i| {
             let val = eig.eigenvalues[i];
@@ -251,7 +272,6 @@ pub fn spectral_decompose(laplacian: &SparseLaplacian, k_max: usize) -> Spectral
         .collect();
     pairs.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
 
-    // Clamp tiny negative eigenvalues to 0 (numerical noise)
     for (v, _) in &mut pairs {
         if *v < 0.0 && v.abs() < 1e-10 {
             *v = 0.0;
@@ -262,6 +282,159 @@ pub fn spectral_decompose(laplacian: &SparseLaplacian, k_max: usize) -> Spectral
     let eigenvalues: Vec<f64> = pairs[..kept].iter().map(|(v, _)| *v).collect();
     let eigenvectors: Vec<Vec<f64>> = pairs[..kept].iter().map(|(_, v)| v.clone()).collect();
 
+    build_spectral_result(eigenvalues, eigenvectors, kept, n)
+}
+
+/// Partial eigendecomposition for the k smallest eigenvalues using
+/// Lanczos iteration on the Laplacian. O(n * k * iterations) instead of O(n³).
+#[allow(clippy::needless_range_loop)]
+fn spectral_decompose_partial(laplacian: &SparseLaplacian, k: usize) -> SpectralDecomposition {
+    let n = laplacian.n;
+
+    // Sparse matrix-vector multiply: y = L * x
+    let spmv = |x: &[f64], y: &mut [f64]| {
+        for i in 0..n {
+            y[i] = laplacian.degree[i] * x[i];
+        }
+        for &(i, j, w) in &laplacian.adjacency {
+            y[i] -= w * x[j];
+        }
+    };
+
+    // Use Lanczos to build a tridiagonal matrix, then extract eigenvalues.
+    // Lanczos iteration count: enough for k smallest eigenvalues.
+    let m = (2 * k + 10).min(n); // Lanczos steps
+
+    let mut alpha = vec![0.0f64; m];
+    let mut beta = vec![0.0f64; m];
+    let mut v_prev = vec![0.0f64; n];
+    // Start vector: uniform (orthogonal to constant vector for Fiedler)
+    let mut v_curr = vec![0.0f64; n];
+    // Use alternating sign start vector to excite Fiedler mode
+    for i in 0..n {
+        v_curr[i] = if i % 2 == 0 { 1.0 } else { -1.0 };
+    }
+    // Normalize
+    let norm: f64 = v_curr.iter().map(|x| x * x).sum::<f64>().sqrt();
+    for x in &mut v_curr {
+        *x /= norm;
+    }
+
+    // Store Lanczos vectors for eigenvector recovery
+    let mut lanczos_vecs: Vec<Vec<f64>> = Vec::with_capacity(m);
+    lanczos_vecs.push(v_curr.clone());
+
+    let mut w = vec![0.0f64; n];
+
+    for j in 0..m {
+        spmv(&v_curr, &mut w);
+
+        // w = w - beta[j] * v_prev
+        if j > 0 {
+            for i in 0..n {
+                w[i] -= beta[j - 1] * v_prev[i];
+            }
+        }
+
+        // alpha[j] = w . v_curr
+        alpha[j] = w.iter().zip(v_curr.iter()).map(|(a, b)| a * b).sum();
+
+        // w = w - alpha[j] * v_curr
+        for i in 0..n {
+            w[i] -= alpha[j] * v_curr[i];
+        }
+
+        // Re-orthogonalize against all previous vectors (full reorthogonalization)
+        for prev in &lanczos_vecs {
+            let dot: f64 = w.iter().zip(prev.iter()).map(|(a, b)| a * b).sum();
+            for i in 0..n {
+                w[i] -= dot * prev[i];
+            }
+        }
+
+        // beta[j] = ||w||
+        let b = w.iter().map(|x| x * x).sum::<f64>().sqrt();
+        if b < 1e-14 {
+            // Lanczos breakdown — invariant subspace found
+            alpha.truncate(j + 1);
+            beta.truncate(j);
+            break;
+        }
+        if j < m - 1 {
+            beta[j] = b;
+        }
+
+        // v_prev = v_curr, v_curr = w / beta
+        std::mem::swap(&mut v_prev, &mut v_curr);
+        for i in 0..n {
+            v_curr[i] = w[i] / b;
+        }
+        if j < m - 1 {
+            lanczos_vecs.push(v_curr.clone());
+        }
+    }
+
+    // Build tridiagonal matrix T and solve its eigenvalue problem
+    let tm = alpha.len();
+    use nalgebra::{DMatrix, SymmetricEigen};
+    let t_mat = DMatrix::from_fn(tm, tm, |r, c| {
+        if r == c {
+            alpha[r]
+        } else if r + 1 == c && r < beta.len() {
+            beta[r]
+        } else if c + 1 == r && c < beta.len() {
+            beta[c]
+        } else {
+            0.0
+        }
+    });
+    let eig = SymmetricEigen::new(t_mat);
+
+    // Sort Ritz values ascending
+    let mut ritz: Vec<(f64, usize)> = eig.eigenvalues.iter()
+        .enumerate()
+        .map(|(i, &v)| (v, i))
+        .collect();
+    ritz.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+
+    let kept = k.min(ritz.len());
+    let mut eigenvalues = Vec::with_capacity(kept);
+    let mut eigenvectors = Vec::with_capacity(kept);
+
+    for &(val, idx) in ritz.iter().take(kept) {
+        let mut ev = val;
+        if ev < 0.0 && ev.abs() < 1e-10 {
+            ev = 0.0;
+        }
+        eigenvalues.push(ev);
+
+        // Recover eigenvector: v = V * s where s is the Ritz vector
+        let mut vec = vec![0.0f64; n];
+        for (j, lv) in lanczos_vecs.iter().enumerate() {
+            let coeff = eig.eigenvectors[(j, idx)];
+            for i in 0..n {
+                vec[i] += coeff * lv[i];
+            }
+        }
+        // Normalize
+        let norm: f64 = vec.iter().map(|x| x * x).sum::<f64>().sqrt();
+        if norm > 1e-14 {
+            for x in &mut vec {
+                *x /= norm;
+            }
+        }
+        eigenvectors.push(vec);
+    }
+
+    build_spectral_result(eigenvalues, eigenvectors, kept, n)
+}
+
+fn build_spectral_result(
+    eigenvalues: Vec<f64>,
+    eigenvectors: Vec<Vec<f64>>,
+    kept: usize,
+    n: usize,
+) -> SpectralDecomposition {
     let spectral_gap = if eigenvalues.len() > 1 { eigenvalues[1].max(0.0) } else { 0.0 };
     let cheeger_estimate = (2.0 * spectral_gap).sqrt();
     let fiedler_vector = if eigenvectors.len() > 1 {
