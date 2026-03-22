@@ -7,7 +7,7 @@ use std::time::Instant;
 
 use pse_core::{macro_step, GlobalState};
 use pse_evidence::verify_crystal;
-use pse_graph::{ingest, PassthroughAdapter};
+use pse_graph::{ingest, FastPassthroughAdapter, PassthroughAdapter};
 use pse_replay::compare_crystal_sequences;
 use pse_types::{Config, MeasurementContext, RunDescriptor, SchedulerConfig, SemanticCrystal};
 
@@ -15,7 +15,9 @@ fn main() {
     println!("PSE Benchmark Suite v0.1.0");
     println!("==========================\n");
 
+    bench_b01a_diag();
     bench_b01a_observe_only();
+    bench_b01a_fast();
     let crystals_b01 = bench_b01b_full_pipeline();
     bench_b02_crystal_serialization(&crystals_b01);
     bench_b03_evidence_verification(&crystals_b01);
@@ -77,6 +79,91 @@ fn build_obs_batches(n_entities: usize, n_ticks: usize) -> Vec<Vec<Vec<u8>>> {
                 .collect()
         })
         .collect()
+}
+
+// ─── B01a Diagnostic: per-phase timing breakdown ────────────────────────────
+
+fn bench_b01a_diag() {
+    let n_entities = 50;
+    let n_ticks = 200;
+    let config = Config::default();
+    let adapter = PassthroughAdapter::new("bench");
+    let ctx = MeasurementContext::default();
+
+    // Pre-build payloads
+    let all_batches = build_obs_batches(n_entities, n_ticks);
+    let mut graph = pse_graph::PersistentGraph::new();
+
+    let mut t_ingest: u128 = 0;
+    let mut t_graph: u128 = 0;
+    let total_obs = (n_entities * n_ticks) as f64;
+
+    let t_total_start = Instant::now();
+    for batch in &all_batches {
+        let t0 = Instant::now();
+        let mut canonical: Vec<pse_types::Observation> = Vec::with_capacity(batch.len());
+        for raw in batch {
+            let obs = ingest(&adapter, raw, &ctx).unwrap();
+            canonical.push(obs);
+        }
+        let t1 = Instant::now();
+        t_ingest += (t1 - t0).as_nanos();
+
+        graph
+            .apply_observations(&canonical, &config.persistence)
+            .unwrap();
+        let t2 = Instant::now();
+        t_graph += (t2 - t1).as_nanos();
+    }
+    let t_total = t_total_start.elapsed().as_nanos();
+    let t_overhead = t_total.saturating_sub(t_ingest + t_graph);
+
+    println!("B01a diagnostic ({} obs):", total_obs as u64);
+    println!("  ingest (canon+SHA):  {:>6.0} ns/obs", t_ingest as f64 / total_obs);
+    println!("  graph persist:       {:>6.0} ns/obs", t_graph as f64 / total_obs);
+    println!("  overhead:            {:>6.0} ns/obs", t_overhead as f64 / total_obs);
+    println!(
+        "  total:               {:>6.0} ns/obs  ({:.0} obs/sec)",
+        t_total as f64 / total_obs,
+        total_obs / (t_total as f64 / 1_000_000_000.0)
+    );
+    println!();
+}
+
+// ─── B01a fast: using FastPassthroughAdapter + ingest_trusted ────────────────
+
+fn bench_b01a_fast() {
+    let n_entities = 50;
+    let n_ticks = 200;
+    let config = Config::default();
+    let adapter = FastPassthroughAdapter::new("bench");
+
+    let all_batches = build_obs_batches(n_entities, n_ticks);
+    let mut graph = pse_graph::PersistentGraph::new();
+
+    let start = Instant::now();
+    for batch in &all_batches {
+        let mut canonical: Vec<pse_types::Observation> = Vec::with_capacity(batch.len());
+        for raw in batch {
+            canonical.push(adapter.ingest(raw));
+        }
+        graph
+            .apply_observations(&canonical, &config.persistence)
+            .unwrap();
+    }
+    let elapsed = start.elapsed();
+
+    let total_obs = (n_entities * n_ticks) as f64;
+    let obs_per_sec = total_obs / elapsed.as_secs_f64();
+
+    println!(
+        "B01a FAST:         {:.0} obs/sec ({} obs in {:.4}s, graph: {} vertices {} edges)",
+        obs_per_sec,
+        total_obs as u64,
+        elapsed.as_secs_f64(),
+        graph.graph.node_count(),
+        graph.graph.edge_count(),
+    );
 }
 
 // ─── B01a: Observe Only (canonicalize + graph persist, NO tick/crystallize) ──
