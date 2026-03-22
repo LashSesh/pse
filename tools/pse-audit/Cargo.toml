@@ -1,0 +1,17 @@
+[package]
+name = "pse-audit"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "PSE audit pipeline — evidence chain verification and compliance reporting"
+
+[dependencies]
+pse-types = { path = "../../crates/pse-types" }
+pse-core = { path = "../../crates/pse-core" }
+pse-graph = { path = "../../crates/pse-graph" }
+pse-evidence = { path = "../../crates/pse-evidence" }
+pse-store = { path = "../../crates/pse-store" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = "1"

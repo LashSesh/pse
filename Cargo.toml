@@ -24,6 +24,15 @@ members = [
     "crates/pse",
     "adapters/pse-adapter-binance",
     "adapters/pse-adapter-entsoe",
+    "adapters/pse-adapter-seismo",
+    "adapters/pse-adapter-weather",
+    "adapters/pse-adapter-airquality",
+    "adapters/pse-adapter-iot",
+    "adapters/pse-adapter-syslog",
+    "adapters/pse-adapter-vitals",
+    "adapters/pse-adapter-tabular",
+    "adapters/pse-adapter-modelmon",
+    "tools/pse-audit",
 ]
 
 [workspace.package]
