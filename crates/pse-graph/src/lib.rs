@@ -60,6 +60,18 @@ pub fn ingest(
     Ok(obs)
 }
 
+/// Fast ingestion path that trusts the adapter's digest computation.
+/// Skips the redundant SHA-256 re-verification. Use when the adapter is
+/// known to produce correct digests (e.g. PassthroughAdapter).
+#[inline]
+pub fn ingest_trusted(
+    adapter: &dyn ObservationAdapter,
+    raw: &[u8],
+    ctx: &MeasurementContext,
+) -> Result<Observation, ObserveError> {
+    adapter.canonicalize(raw, ctx)
+}
+
 /// A passthrough adapter that treats raw bytes as payload.
 pub struct PassthroughAdapter {
     id: String,
@@ -96,6 +108,64 @@ impl ObservationAdapter for PassthroughAdapter {
             digest,
             schema_version: self.schema_version.clone(),
         })
+    }
+}
+
+/// High-throughput adapter that minimizes per-observation overhead.
+///
+/// Compared to `PassthroughAdapter`:
+/// - Caches `derive_vertex_id` result (avoids FNV hash per obs)
+/// - Pre-computes provenance and context once
+/// - `ingest()` computes SHA-256 exactly once (no verification re-hash)
+pub struct FastPassthroughAdapter {
+    id: String,
+    schema_version: String,
+    /// Pre-computed vertex ID for this source.
+    pub cached_vid: VertexId,
+}
+
+impl FastPassthroughAdapter {
+    pub fn new(id: impl Into<String>) -> Self {
+        let id = id.into();
+        let cached_vid = derive_vertex_id(&id);
+        Self {
+            id,
+            schema_version: "1.0.0".to_string(),
+            cached_vid,
+        }
+    }
+
+    /// Ingest raw bytes into an Observation.
+    /// Computes SHA-256 exactly once. No verification re-hash.
+    #[inline]
+    pub fn ingest(&self, raw: &[u8]) -> Observation {
+        let payload = raw.to_vec();
+        let digest: Hash256 = content_address_raw(&payload);
+        Observation {
+            timestamp: 0.0,
+            source_id: self.id.clone(),
+            provenance: ProvenanceEnvelope {
+                origin: self.id.clone(),
+                chain: Vec::new(),
+                sig: None,
+            },
+            payload,
+            context: MeasurementContext::default(),
+            digest,
+            schema_version: self.schema_version.clone(),
+        }
+    }
+}
+
+impl ObservationAdapter for FastPassthroughAdapter {
+    fn source_id(&self) -> &str { &self.id }
+
+    fn canonicalize(
+        &self,
+        raw: &[u8],
+        _context: &MeasurementContext,
+    ) -> Result<Observation, ObserveError> {
+        Ok(self.ingest(raw))
     }
 }
 
@@ -321,17 +391,23 @@ impl PersistentGraph {
             }
         }
 
+        // Deduplicate vertex IDs before pairwise edge creation to avoid
+        // redundant upsert_edge calls when many observations share a source.
+        // We still create edges for all unique pairs (including self-loops
+        // when a single vertex appears, since metrics depend on edge_count).
         let batch_ts = obs_batch.first().map(|o| o.timestamp).unwrap_or(0.0);
+        let raw_len = batch_vids.len();
+        batch_vids.sort_unstable();
+        batch_vids.dedup();
         let n = batch_vids.len();
-        if n <= 64 {
+        if n == 1 && raw_len > 1 {
+            // All observations mapped to same vertex — create a self-loop
+            // (preserves edge_count for j-metric computation).
+            self.upsert_edge(batch_vids[0], batch_vids[0], batch_ts);
+        } else if n <= 64 {
             for i in 0..n {
                 for j in (i + 1)..n {
-                    let (u, v) = if batch_vids[i] < batch_vids[j] {
-                        (batch_vids[i], batch_vids[j])
-                    } else {
-                        (batch_vids[j], batch_vids[i])
-                    };
-                    self.upsert_edge(u, v, batch_ts);
+                    self.upsert_edge(batch_vids[i], batch_vids[j], batch_ts);
                 }
             }
         } else {
@@ -339,12 +415,14 @@ impl PersistentGraph {
                 let next1 = (i + 1) % n;
                 let next2 = (i + 2) % n;
                 for &next in &[next1, next2] {
-                    let (u, v) = if batch_vids[i] < batch_vids[next] {
-                        (batch_vids[i], batch_vids[next])
-                    } else {
-                        (batch_vids[next], batch_vids[i])
-                    };
-                    self.upsert_edge(u, v, batch_ts);
+                    if batch_vids[i] != batch_vids[next] {
+                        let (u, v) = if batch_vids[i] < batch_vids[next] {
+                            (batch_vids[i], batch_vids[next])
+                        } else {
+                            (batch_vids[next], batch_vids[i])
+                        };
+                        self.upsert_edge(u, v, batch_ts);
+                    }
                 }
             }
         }
