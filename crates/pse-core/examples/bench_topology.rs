@@ -4,7 +4,6 @@
 
 use std::time::Instant;
 
-use pse_core::GlobalState;
 use pse_graph::PersistentGraph;
 use pse_navigator::{Navigator, NavigatorConfig, SpectralSignature};
 use pse_topology::{
@@ -144,22 +143,41 @@ fn bench_b08_kuramoto(graph: &PersistentGraph) {
         return;
     }
 
+    // Build a Kuramoto-specific graph with narrow frequency band.
+    // Original graph has ω ∈ [0, TAU] — too wide for synchronization.
+    // Use ω ∈ [-1, 1] with κ=4.0 (well above κ_c ≈ 0.64).
+    let mut kgraph = PersistentGraph::new();
+    let n_nodes = graph.graph.node_count();
+    for (i, (&vid, _)) in graph.embedding.iter().enumerate() {
+        kgraph.upsert_vertex(vid, 0.0);
+        let omega = -1.0 + 2.0 * (i as f64 / n_nodes.max(1) as f64);
+        kgraph.embedding.insert(vid, FiveDState {
+            p: 0.0, rho: 0.0, omega, chi: 0.0, eta: 0.0,
+        });
+    }
+    for edge in graph.graph.raw_edges() {
+        let src = graph.graph[edge.source()].id;
+        let tgt = graph.graph[edge.target()].id;
+        kgraph.upsert_edge(src, tgt, 0.0);
+    }
+
     let topo_config = TopologyConfig {
-        kuramoto_steps: 500,
+        kuramoto_steps: 2000,
         kuramoto_dt: 0.05,
-        kuramoto_coupling: 2.0,
+        kuramoto_coupling: 4.0,
         ..TopologyConfig::default()
     };
 
-    let mut kstate = init_kuramoto_state(graph);
+    let mut kstate = init_kuramoto_state(&kgraph);
     let threshold = 0.95;
 
     let start = Instant::now();
     let mut converged_tick = None;
     for tick in 0..topo_config.kuramoto_steps {
-        kuramoto_step(&mut kstate, graph, &topo_config);
+        kuramoto_step(&mut kstate, &kgraph, &topo_config);
         if kstate.order_parameter >= threshold && converged_tick.is_none() {
             converged_tick = Some(tick + 1);
+            break;
         }
     }
     let elapsed = start.elapsed();
@@ -218,38 +236,49 @@ fn bench_b09_navigator_step() {
 // ─── B10: Constraint Propagation ─────────────────────────────────────────────
 
 fn bench_b10_constraint_propagation() {
-    // pse-constraint doesn't expose a DoF analysis API directly.
-    // Benchmark morphogenic pressure computation across components as a proxy.
+    // Measure actual morphogenic pressure + mutation via pse_constraint.
     let config = Config::default();
     let n_components = 20;
+    let vertices_per_component = 5;
+
+    let mut graph = PersistentGraph::new();
+    for comp in 0..n_components {
+        for v in 0..vertices_per_component {
+            let vid = (comp * vertices_per_component + v) as u64 + 1;
+            graph.upsert_vertex(vid, 0.0);
+            let phase = (comp as f64 * 0.3 + v as f64 * 0.1) % std::f64::consts::TAU;
+            graph.embedding.insert(vid, FiveDState {
+                p: comp as f64 / n_components as f64,
+                rho: 0.5 + 0.2 * phase.sin(),
+                omega: phase,
+                chi: v as f64 / vertices_per_component as f64,
+                eta: 0.1,
+            });
+        }
+        for v in 0..(vertices_per_component - 1) {
+            let a = (comp * vertices_per_component + v) as u64 + 1;
+            graph.upsert_edge(a, a + 1, 0.0);
+        }
+    }
+
+    let mut morph = pse_constraint::MorphState::new();
 
     let start = Instant::now();
-    let mut dof_zero = 0;
-    for i in 0..n_components {
-        let mut state = GlobalState::new(&config);
-        // Use a unique adapter per component so each gets its own vertex
-        let adapter = pse_graph::PassthroughAdapter::new(format!("comp_{}", i));
-        for tick in 0..10 {
-            let value = ((tick as f64 * 0.1) + (i as f64 * 0.3)).sin();
-            let payload = serde_json::json!({
-                "entity": format!("comp_{}", i),
-                "value": value,
-                "tick": tick,
-            });
-            let batch = vec![serde_json::to_vec(&payload).unwrap()];
-            let _ = pse_core::macro_step(&mut state, &batch, &config, &adapter);
-        }
-        // Check if morph pressure is zero (proxy for DoF=0)
-        if state.morph.pressure.values().all(|p| *p < 0.01) {
-            dof_zero += 1;
-        }
+    let mut total_mutations = 0;
+    for _ in 0..100 {
+        let mutations = pse_constraint::morphogenic_update(
+            &mut graph, &mut morph, &[], &config.adaptation,
+        );
+        total_mutations += mutations.len();
     }
     let elapsed = start.elapsed();
 
-    let us_per_comp = elapsed.as_micros() as f64 / n_components as f64;
-    let pct_zero = (dof_zero as f64 / n_components as f64) * 100.0;
+    let total_evals = 100 * n_components;
+    let us_per_comp = elapsed.as_micros() as f64 / total_evals as f64;
+    let dof_zero = morph.pressure.values().filter(|p| **p < 0.01).count();
+    let pct_zero = (dof_zero as f64 / morph.pressure.len().max(1) as f64) * 100.0;
     println!(
-        "B10 constraint_propagation: {:.1} µs/component, {:.0}% DoF=0",
-        us_per_comp, pct_zero,
+        "B10 constraint_propagation: {:.1} µs/component, {:.0}% DoF=0 ({} mutations)",
+        us_per_comp, pct_zero, total_mutations,
     );
 }
