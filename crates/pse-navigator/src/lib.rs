@@ -284,6 +284,27 @@ impl SimplexMesh {
         pse_topology::spectral_decompose(laplacian, k).spectral_gap
     }
 
+    /// Spectral gradient + spectral gap from a single decomposition.
+    /// Avoids the double-decompose that happens when calling spectral_gradient
+    /// then spectral_gap separately.
+    #[allow(clippy::needless_range_loop)]
+    pub fn spectral_gradient_and_gap(
+        &self,
+        vertex_id: usize,
+        laplacian: &pse_topology::SparseLaplacian,
+    ) -> (Vec<f64>, f64) {
+        let dim = self.vertices.get(vertex_id).map(|v| v.point.len()).unwrap_or(1);
+        if laplacian.n < 2 || self.vertices.is_empty() {
+            return (vec![0.0; dim], 0.0);
+        }
+
+        let k = laplacian.n.min(10);
+        let decomp = pse_topology::spectral_decompose(laplacian, k);
+        let gap = decomp.spectral_gap;
+        let gradient = self.gradient_from_fiedler(vertex_id, &decomp.fiedler_vector, dim);
+        (gradient, gap)
+    }
+
     /// Spectral gradient: direction from vertex toward the Fiedler-opposite cluster.
     /// This is the "invisible string" — the Fiedler vector tells TRITON where to go.
     #[allow(clippy::needless_range_loop)]
@@ -299,7 +320,12 @@ impl SimplexMesh {
 
         let k = laplacian.n.min(10);
         let decomp = pse_topology::spectral_decompose(laplacian, k);
-        let fiedler = &decomp.fiedler_vector;
+        self.gradient_from_fiedler(vertex_id, &decomp.fiedler_vector, dim)
+    }
+
+    /// Extract gradient direction from Fiedler vector.
+    #[allow(clippy::needless_range_loop)]
+    fn gradient_from_fiedler(&self, vertex_id: usize, fiedler: &[f64], dim: usize) -> Vec<f64> {
 
         if fiedler.len() <= vertex_id {
             return vec![0.0; dim];
@@ -619,8 +645,9 @@ impl<E: Fn(&[f64]) -> SpectralSignature> Navigator<E> {
         // 8. Compute Laplacian on the mesh
         let laplacian = self.mesh.laplacian_matrix();
 
-        // 9. Spectral gradient → TRITON momentum bias
-        let gradient = self.mesh.spectral_gradient(vertex_id, &laplacian);
+        // 9. Spectral gradient + gap from a SINGLE decomposition
+        let (gradient, spectral_gap) =
+            self.mesh.spectral_gradient_and_gap(vertex_id, &laplacian);
 
         // 10. Momentum update (reward = current / best resonance)
         let best_res = self
@@ -640,7 +667,6 @@ impl<E: Fn(&[f64]) -> SpectralSignature> Navigator<E> {
         self.spiral.record_result(point.clone(), signature.clone());
 
         // 13. Collect metrics for step record
-        let spectral_gap = self.mesh.spectral_gap(&laplacian);
         let betti = self.mesh.betti_numbers();
 
         let step = ExplorationStep {
