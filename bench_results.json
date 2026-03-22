@@ -7,27 +7,27 @@
     "B01a_observe_only": {
       "detail": "10000 obs, 1 vertices",
       "unit": "obs/sec",
-      "value": 1701866.948042002
+      "value": 1837945.7500904729
     },
     "B01b_full_pipeline": {
       "detail": "58 crystals from 10000 obs",
       "unit": "obs/sec",
-      "value": 599688.1381806205
+      "value": 607446.0616750921
     },
     "B02_crystal_serialization": {
       "detail": "1000 iterations",
       "unit": "µs/crystal",
-      "value": 39.88
+      "value": 39.298
     },
     "B03_evidence_verification": {
       "detail": "1000 iterations",
       "unit": "µs/verify",
-      "value": 1.502
+      "value": 1.498
     },
     "B04_replay_speed": {
       "detail": "58 crystals",
       "unit": "steps/sec",
-      "value": 16108.138443650992
+      "value": 17294.115927820243
     },
     "B05_determinism_check": {
       "detail": "58 crystals, PASS",
@@ -37,55 +37,55 @@
     "B06_laplacian_computation": {
       "detail": "n=200, rank=50",
       "unit": "ms",
-      "value": 8.518332
+      "value": 4.488142
     },
     "B07_fiedler_vector": {
-      "detail": "dim=200, range=0.2496",
+      "detail": "dim=200, range=0.5279",
       "unit": "µs",
-      "value": 8556.0
+      "value": 85.0
     },
     "B08_kuramoto_convergence": {
       "detail": "18 ticks, r=0.9503",
       "unit": "ms",
-      "value": 3.067246
+      "value": 3.013042
     },
     "B09_navigator_step": {
       "detail": "50 steps",
       "unit": "µs/step",
-      "value": 147.92
+      "value": 106.32
     },
     "B10_constraint_propagation": {
       "detail": "0% DoF=0, 8676 mutations",
       "unit": "µs/component",
-      "value": 13.6445
+      "value": 13.7175
     },
     "B11_memory_scaling": {
       "detail": "5000 entities, 50000 obs, ~2400216 bytes",
       "unit": "ms",
-      "value": 57.912533
+      "value": 55.681663
     },
     "B12_capsule_roundtrip": {
       "detail": "1000 iterations",
       "unit": "µs/roundtrip",
-      "value": 3.462
+      "value": 3.494
     },
     "B13_registry_lookup": {
       "detail": "100 entries, 10000 lookups",
       "unit": "µs/lookup",
-      "value": 0.0962
+      "value": 0.0755
     },
     "B14_swarm_consensus": {
       "detail": "4 members, 1 rounds, consensus=true",
       "unit": "ms",
-      "value": 0.049703000000000004
+      "value": 0.049389999999999996
     },
     "B15_full_macro_step": {
       "detail": "REJECTED, 50 obs",
       "unit": "µs",
-      "value": 40.0
+      "value": 39.0
     }
   },
   "suite": "PSE Benchmark Suite",
-  "timestamp": "2026-03-22T17:10:45.026867672+00:00",
+  "timestamp": "2026-03-22T18:23:36.945155825+00:00",
   "version": "0.1.0"
 }
