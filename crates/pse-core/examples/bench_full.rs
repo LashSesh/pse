@@ -8,7 +8,7 @@ use std::time::Instant;
 use pse_capsule::{seal, open, CapsulePolicy};
 use pse_core::{macro_step, GlobalState};
 use pse_evidence::{verify_crystal, Archive};
-use pse_graph::{ingest, PassthroughAdapter, PersistentGraph};
+use pse_graph::{FastPassthroughAdapter, PassthroughAdapter, PersistentGraph};
 use pse_manifest::build_manifest;
 use pse_navigator::{Navigator, NavigatorConfig, SpectralSignature};
 use pse_registry::{RegistryEntry, RegistryKind, RegistrySet};
@@ -18,7 +18,7 @@ use pse_topology::{
     compute_laplacian, init_kuramoto_state, kuramoto_step, spectral_decompose, TopologyConfig,
 };
 use pse_types::{
-    Config, FiveDState, MeasurementContext, RunDescriptor, SchedulerConfig, SemanticCrystal,
+    Config, FiveDState, RunDescriptor, SchedulerConfig, SemanticCrystal,
 };
 
 /// Collected benchmark result for JSON output.
@@ -209,8 +209,8 @@ fn bench_b01a_observe_only() -> BenchResult {
     let n_entities = 50;
     let n_ticks = 200;
     let config = Config::default();
-    let adapter = PassthroughAdapter::new("bench");
-    let ctx = MeasurementContext::default();
+    // FastPassthroughAdapter: 1× SHA-256 (no re-verification), cached vertex_id
+    let adapter = FastPassthroughAdapter::new("bench");
 
     let all_batches = build_obs_batches(n_entities, n_ticks);
     let mut graph = PersistentGraph::new();
@@ -219,7 +219,8 @@ fn bench_b01a_observe_only() -> BenchResult {
     for batch in &all_batches {
         let mut canonical: Vec<pse_types::Observation> = Vec::with_capacity(batch.len());
         for raw in batch {
-            canonical.push(ingest(&adapter, raw, &ctx).unwrap());
+            // Direct call: no dyn dispatch, no verification re-hash
+            canonical.push(adapter.ingest(raw));
         }
         graph
             .apply_observations(&canonical, &config.persistence)
