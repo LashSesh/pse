@@ -6,7 +6,8 @@ use std::collections::BTreeMap;
 use std::time::Instant;
 
 use pse_capsule::{seal, open, CapsulePolicy};
-use pse_core::{macro_step, GlobalState};
+use pse_core::{macro_step, GlobalState, load_memory_from_crystals};
+use pse_memory::{PatternMemory, MemoryConfig, CrystalSignature};
 use pse_evidence::{verify_crystal, Archive};
 use pse_graph::{FastPassthroughAdapter, PassthroughAdapter, PersistentGraph};
 use pse_manifest::build_manifest;
@@ -69,6 +70,14 @@ fn main() {
     results.push(bench_b13_registry_lookup());
     results.push(bench_b14_swarm_consensus());
     results.push(bench_b15_full_macro_step());
+
+    println!();
+
+    // Phase 4: Pattern Memory
+    results.push(bench_b16_memory_load());
+    results.push(bench_b17_memory_lookup());
+    results.push(bench_b18_memory_insert());
+    results.push(bench_b19_cross_session());
 
     println!();
 
@@ -850,6 +859,149 @@ fn bench_b15_full_macro_step() -> BenchResult {
     BenchResult {
         key: "B15_full_macro_step", value: us,
         unit: "µs", detail: format!("{}, {} obs", crystal_str, n_entities),
+    }
+}
+
+// ─── Phase 4: Pattern Memory ────────────────────────────────────────────────
+
+fn build_test_signatures(n: usize) -> Vec<CrystalSignature> {
+    (0..n).map(|i| {
+        let f = i as f64 / n as f64;
+        CrystalSignature {
+            crystal_id: {
+                let mut id = [0u8; 32];
+                id[0] = (i & 0xff) as u8;
+                id[1] = ((i >> 8) & 0xff) as u8;
+                id
+            },
+            spectral: vec![
+                f * 2.0, (f * 3.0).sin(), f * 0.5 + 0.1, (f * 7.0).cos(),
+                (i % 5) as f64, (i % 3) as f64, 0.0, (i as f64 * 0.1).sin(),
+            ],
+            resonance: 0.3 + f * 0.4,
+            confidence: 0.5 + f * 0.3,
+            content_hash: {
+                let mut h = [0u8; 32];
+                h[0] = (i & 0xff) as u8;
+                h[1] = ((i >> 8) & 0xff) as u8;
+                h
+            },
+            tick_range: (i as u64, i as u64),
+            observation_count: 10 + i % 20,
+        }
+    }).collect()
+}
+
+fn bench_b16_memory_load() -> BenchResult {
+    let n = 1000;
+    let crystals = run_scenario(&Config::default(), 30, 200);
+    // Build signatures from the crystals if available, or synthetic
+    let mut mem = PatternMemory::new(MemoryConfig::default());
+    let start = Instant::now();
+    if !crystals.is_empty() {
+        mem.load_from_crystals(&crystals);
+    }
+    // Also load synthetic to ensure we reach target count
+    let sigs = build_test_signatures(n);
+    for sig in sigs {
+        mem.insert(sig);
+    }
+    let elapsed = start.elapsed();
+    let ms = elapsed.as_millis() as f64;
+    println!("B16 memory_load: {:.1} ms ({} signatures)", ms, mem.len());
+    BenchResult {
+        key: "B16_memory_load", value: ms,
+        unit: "ms", detail: format!("{} signatures", mem.len()),
+    }
+}
+
+fn bench_b17_memory_lookup() -> BenchResult {
+    let n = 1000;
+    let mut mem = PatternMemory::new(MemoryConfig::default());
+    let sigs = build_test_signatures(n);
+    for sig in &sigs {
+        mem.insert(sig.clone());
+    }
+
+    let lookups = 1000;
+    let test_sigs = build_test_signatures(lookups);
+    let start = Instant::now();
+    for sig in &test_sigs {
+        let _ = mem.lookup(sig);
+    }
+    let elapsed = start.elapsed();
+    let us_per = elapsed.as_micros() as f64 / lookups as f64;
+    println!("B17 memory_lookup: {:.2} µs/lookup ({} lookups vs {} signatures)",
+        us_per, lookups, n);
+    BenchResult {
+        key: "B17_memory_lookup", value: us_per,
+        unit: "µs/lookup", detail: format!("{} lookups vs {} sigs", lookups, n),
+    }
+}
+
+fn bench_b18_memory_insert() -> BenchResult {
+    let mut mem = PatternMemory::new(MemoryConfig::default());
+    let sigs = build_test_signatures(1000);
+    let start = Instant::now();
+    for sig in sigs {
+        mem.insert(sig);
+    }
+    let elapsed = start.elapsed();
+    let us_per = elapsed.as_micros() as f64 / 1000.0;
+    println!("B18 memory_insert: {:.2} µs/insert ({} inserts)", us_per, 1000);
+    BenchResult {
+        key: "B18_memory_insert", value: us_per,
+        unit: "µs/insert", detail: format!("{} inserts", 1000),
+    }
+}
+
+fn bench_b19_cross_session() -> BenchResult {
+    let config = Config::default();
+    let adapter = PassthroughAdapter::new("cross_session");
+    let n_ticks = 200;
+    let n_entities = 20;
+
+    // Session 1: cold
+    let mut state1 = GlobalState::new(&config);
+    let start1 = Instant::now();
+    for tick in 0..n_ticks {
+        let batch = (0..n_entities).map(|e| {
+            serde_json::to_vec(&serde_json::json!({
+                "entity": format!("s_{:03}", e),
+                "value": ((tick as f64 * 0.1) + (e as f64 * 0.2)).sin(),
+                "tick": tick,
+            })).unwrap()
+        }).collect::<Vec<_>>();
+        let _ = macro_step(&mut state1, &batch, &config, &adapter);
+    }
+    let time1 = start1.elapsed();
+    let crystals1: Vec<_> = state1.archive.crystals().to_vec();
+
+    // Session 2: warm (load crystals from session 1)
+    let mut state2 = GlobalState::new(&config);
+    load_memory_from_crystals(&mut state2, &crystals1);
+    let start2 = Instant::now();
+    for tick in 0..n_ticks {
+        let batch = (0..n_entities).map(|e| {
+            serde_json::to_vec(&serde_json::json!({
+                "entity": format!("s_{:03}", e),
+                "value": ((tick as f64 * 0.1) + (e as f64 * 0.2)).sin(),
+                "tick": tick,
+            })).unwrap()
+        }).collect::<Vec<_>>();
+        let _ = macro_step(&mut state2, &batch, &config, &adapter);
+    }
+    let time2 = start2.elapsed();
+
+    let speedup = if time1.as_nanos() > 0 {
+        ((time1.as_nanos() as f64 - time2.as_nanos() as f64) / time1.as_nanos() as f64 * 100.0).max(0.0)
+    } else { 0.0 };
+
+    println!("B19 cross_session: {:.0}% faster (session1={:.0}ms, session2={:.0}ms, mem={})",
+        speedup, time1.as_millis(), time2.as_millis(), crystals1.len());
+    BenchResult {
+        key: "B19_cross_session", value: speedup,
+        unit: "%_faster", detail: format!("s1={:.0}ms s2={:.0}ms mem={}", time1.as_millis(), time2.as_millis(), crystals1.len()),
     }
 }
 

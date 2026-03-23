@@ -23,6 +23,7 @@ pse-navigator = { path = "../pse-navigator" }
 pse-capsule = { path = "../pse-capsule" }
 pse-swarm = { path = "../pse-swarm" }
 pse-pmhd = { path = "../pse-pmhd" }
+pse-memory = { path = "../pse-memory" }
 sha2 = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

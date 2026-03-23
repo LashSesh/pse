@@ -20,6 +20,7 @@ pse-manifest = { path = "../pse-manifest" }
 pse-capsule = { path = "../pse-capsule" }
 pse-scheduler = { path = "../pse-scheduler" }
 pse-store = { path = "../pse-store" }
+pse-memory = { path = "../pse-memory" }
 pse-topology = { path = "../pse-topology" }
 pse-scale = { path = "../pse-scale" }
 pse-pmhd = { path = "../pse-pmhd" }

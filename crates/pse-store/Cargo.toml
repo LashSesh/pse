@@ -4,13 +4,18 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "SQLite persistence layer for crystals, traces, and metrics"
+description = "Persistence layer for crystals, traces, and metrics"
+
+[features]
+default = ["sqlite"]
+sqlite = ["rusqlite"]
+memory-only = []
 
 [dependencies]
 pse-types = { path = "../pse-types" }
 serde = { workspace = true }
 serde_json = { workspace = true }
-rusqlite = { workspace = true }
+rusqlite = { workspace = true, optional = true }
 chrono = { workspace = true }
 thiserror = { workspace = true }
 sha2 = { workspace = true }

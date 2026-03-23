@@ -29,6 +29,7 @@ use pse_cascade::{
 use pse_cascade::{build_phase_ladder, helix_pair, mandorla, restore_neutrality};
 use pse_evidence::{Archive, build_crystal_with_id};
 use pse_constraint::{intrinsic_step, morphogenic_update, MorphState};
+use pse_memory::{PatternMemory, MemoryConfig};
 use thiserror::Error;
 
 
@@ -101,6 +102,8 @@ pub struct GlobalState {
     pub scale_state: pse_scale::MultiScaleState,
     /// Count of pattern-memory hits (regions that matched existing crystals).
     pub pattern_hits: u64,
+    /// Persistent pattern memory — topological similarity index for cross-session learning.
+    pub memory: PatternMemory,
 }
 
 impl GlobalState {
@@ -125,8 +128,16 @@ impl GlobalState {
             last_gate_passed: false,
             scale_state: pse_scale::MultiScaleState::default(),
             pattern_hits: 0,
+            memory: PatternMemory::new(MemoryConfig::default()),
         }
     }
+}
+
+/// Load crystals into the engine's pattern memory for cross-session learning.
+/// Call this after creating GlobalState to restore memory from a previous session.
+/// Returns the number of signatures loaded.
+pub fn load_memory_from_crystals(state: &mut GlobalState, crystals: &[SemanticCrystal]) -> usize {
+    state.memory.load_from_crystals(crystals)
 }
 
 // ─── Metric Computation ───────────────────────────────────────────────────────
@@ -364,11 +375,32 @@ pub fn macro_step(
               state.commit_index, program.len(), region.len(),
               state.graph.graph.node_count(), state.graph.graph.edge_count());
 
-    // Pattern memory shortcut: if the extracted region overlaps substantially
-    // with an existing crystal's region, skip the full cascade validation.
-    // This is the core accumulation mechanism — known patterns are recognized
-    // cheaply instead of re-validated expensively.
+    // Pattern memory shortcut: check the topological similarity index for
+    // known patterns. If a similar crystal exists in memory, skip the full
+    // cascade validation. This is the core accumulation mechanism — known
+    // patterns are recognized cheaply instead of re-validated expensively.
+    // Works across sessions when memory is loaded from the store on startup.
     if !region.is_empty() {
+        // First check the signature-based memory index (cross-session capable)
+        let graph_topo = state.graph.topology_signature();
+        let candidate_sig = pse_memory::PatternMemory::extract_candidate_signature(
+            graph_topo.spectral_gap,
+            graph_topo.cheeger_estimate,
+            graph_topo.kuramoto_coherence,
+            graph_topo.mean_propagation_time,
+            graph_topo.betti_0,
+            graph_topo.betti_1,
+            graph_topo.betti_2,
+            graph_topo.euler_char,
+            metrics.g_readiness,
+            region.len(),
+        );
+        if state.memory.lookup(&candidate_sig).is_some() {
+            state.pattern_hits += 1;
+            state.engine_state = EngineState::Idle;
+            return Ok(None);
+        }
+        // Fallback: check archive region overlap (within-session)
         let dominated = state.archive.crystals().iter().any(|c| {
             if c.region.is_empty() {
                 return false;
@@ -517,6 +549,11 @@ pub fn macro_step(
 
     // Commit (append to immutable archive, Inv I10)
     state.archive.append(crystal.clone());
+
+    // Add new crystal to pattern memory for future lookups (cross-session capable)
+    let new_sig = pse_memory::PatternMemory::extract_signature(&crystal);
+    state.memory.insert(new_sig);
+
     state.engine_state = EngineState::Committed;
     // commit_index is already incremented unconditionally at the top of
     // macro_step; do not increment again here.

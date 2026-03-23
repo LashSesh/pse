@@ -1,16 +1,23 @@
 //! Structured persistence layer for PSE (C17).
 //!
-//! SQLite-backed store managing projects, runs, crystals, traces, manifests,
-//! capsules, registries, metrics, alerts, and settings.
+//! Supports two backends:
+//! - **SQLite** (default `sqlite` feature): file-backed store via `IslandStore`
+//! - **Memory-only** (`memory-only` feature): in-memory HashMap store via `MemoryStore`
+//!
+//! Both backends implement the `CrystalStore` trait for crystal persistence.
 
+#[cfg(feature = "sqlite")]
 use std::path::Path;
+#[cfg(feature = "sqlite")]
 use std::sync::Mutex;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+#[cfg(feature = "sqlite")]
 use rusqlite::{Connection, params};
 
 #[derive(Debug, Error)]
 pub enum StoreError {
+    #[cfg(feature = "sqlite")]
     #[error("sqlite error: {0}")]
     Sqlite(#[from] rusqlite::Error),
     #[error("record not found: {0}")]
@@ -19,6 +26,18 @@ pub enum StoreError {
     IntegrityViolation(String),
     #[error("serialization error: {0}")]
     Serde(#[from] serde_json::Error),
+}
+
+/// Trait for crystal storage backends.
+pub trait CrystalStore: Send + Sync {
+    /// Insert a crystal row into the store.
+    fn store_crystal(&self, crystal: &CrystalRow) -> Result<()>;
+    /// Retrieve a crystal by ID.
+    fn fetch_crystal(&self, crystal_id: &str) -> Result<CrystalRow>;
+    /// List all crystals in the store.
+    fn list_all_crystals(&self) -> Result<Vec<CrystalRow>>;
+    /// Count of crystals in the store.
+    fn crystal_count(&self) -> Result<usize>;
 }
 
 pub type Result<T> = std::result::Result<T, StoreError>;
@@ -120,8 +139,10 @@ pub struct ConstitutionRow {
     pub created_at: String,
 }
 
+#[cfg(feature = "sqlite")]
 // ─── Schema Migration SQL ─────────────────────────────────────────────────────
 
+#[cfg(feature = "sqlite")]
 const SCHEMA_V1: &str = "
 CREATE TABLE IF NOT EXISTS _migrations (
     version INTEGER PRIMARY KEY,
@@ -240,12 +261,15 @@ CREATE TABLE IF NOT EXISTS constitution (
 );
 ";
 
+#[cfg(feature = "sqlite")]
 // ─── IslandStore ─────────────────────────────────────────────────────────────
 
+#[cfg(feature = "sqlite")]
 pub struct IslandStore {
     conn: Mutex<Connection>,
 }
 
+#[cfg(feature = "sqlite")]
 impl IslandStore {
     /// Open a file-backed SQLite database. Creates file if not present.
     pub fn open(path: &Path) -> Result<Self> {
@@ -794,13 +818,115 @@ impl IslandStore {
     }
 }
 
+// ─── CrystalStore impl for IslandStore ───────────────────────────────────────
+
+#[cfg(feature = "sqlite")]
+impl CrystalStore for IslandStore {
+    fn store_crystal(&self, crystal: &CrystalRow) -> Result<()> {
+        self.insert_crystal(crystal)
+    }
+
+    fn fetch_crystal(&self, crystal_id: &str) -> Result<CrystalRow> {
+        self.get_crystal(crystal_id)
+    }
+
+    fn list_all_crystals(&self) -> Result<Vec<CrystalRow>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT crystal_id, run_id, stability_score, free_energy, created_at_tick, \
+             carrier_instance, constraint_count, region_size, topology_signature, \
+             validation_status, data FROM crystals ORDER BY crystal_id"
+        ).map_err(StoreError::Sqlite)?;
+        let rows = stmt.query_map([], |row| Ok(CrystalRow {
+            crystal_id: row.get(0)?,
+            run_id: row.get(1)?,
+            stability_score: row.get(2)?,
+            free_energy: row.get(3)?,
+            created_at_tick: row.get::<_, i64>(4)? as u64,
+            carrier_instance: row.get::<_, i64>(5)? as u64,
+            constraint_count: row.get::<_, i64>(6)? as u64,
+            region_size: row.get::<_, i64>(7)? as u64,
+            topology_signature: row.get(8)?,
+            validation_status: row.get(9)?,
+            data: row.get(10)?,
+        })).map_err(StoreError::Sqlite)?;
+        let mut crystals = Vec::new();
+        for r in rows { crystals.push(r.map_err(StoreError::Sqlite)?); }
+        Ok(crystals)
+    }
+
+    fn crystal_count(&self) -> Result<usize> {
+        let conn = self.conn.lock().unwrap();
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM crystals", [], |row| row.get(0),
+        ).map_err(StoreError::Sqlite)?;
+        Ok(count as usize)
+    }
+}
+
+// ─── MemoryStore ─────────────────────────────────────────────────────────────
+
+/// In-memory crystal store. No persistence across restarts.
+/// Used for WASM builds and testing.
+pub struct MemoryStore {
+    crystals: std::sync::RwLock<std::collections::HashMap<String, CrystalRow>>,
+}
+
+impl MemoryStore {
+    /// Create a new empty in-memory store.
+    pub fn new() -> Self {
+        Self {
+            crystals: std::sync::RwLock::new(std::collections::HashMap::new()),
+        }
+    }
+}
+
+impl Default for MemoryStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl CrystalStore for MemoryStore {
+    fn store_crystal(&self, crystal: &CrystalRow) -> Result<()> {
+        let mut map = self.crystals.write()
+            .map_err(|e| StoreError::IntegrityViolation(e.to_string()))?;
+        map.insert(crystal.crystal_id.clone(), crystal.clone());
+        Ok(())
+    }
+
+    fn fetch_crystal(&self, crystal_id: &str) -> Result<CrystalRow> {
+        let map = self.crystals.read()
+            .map_err(|e| StoreError::IntegrityViolation(e.to_string()))?;
+        map.get(crystal_id)
+            .cloned()
+            .ok_or_else(|| StoreError::NotFound(crystal_id.to_string()))
+    }
+
+    fn list_all_crystals(&self) -> Result<Vec<CrystalRow>> {
+        let map = self.crystals.read()
+            .map_err(|e| StoreError::IntegrityViolation(e.to_string()))?;
+        let mut crystals: Vec<CrystalRow> = map.values().cloned().collect();
+        crystals.sort_by(|a, b| a.crystal_id.cmp(&b.crystal_id));
+        Ok(crystals)
+    }
+
+    fn crystal_count(&self) -> Result<usize> {
+        let map = self.crystals.read()
+            .map_err(|e| StoreError::IntegrityViolation(e.to_string()))?;
+        Ok(map.len())
+    }
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
+#[cfg(feature = "sqlite")]
 fn now_iso() -> String {
     use chrono::Utc;
     Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()
 }
 
+#[cfg(feature = "sqlite")]
 fn content_id(s: &str) -> String {
     use sha2::{Digest, Sha256};
     let mut h = Sha256::new();
@@ -809,6 +935,7 @@ fn content_id(s: &str) -> String {
 }
 
 mod hex {
+    /// Convert bytes to hex string.
     pub fn bytes_to_hex(b: &[u8]) -> String {
         b.iter().map(|byte| format!("{:02x}", byte)).collect()
     }

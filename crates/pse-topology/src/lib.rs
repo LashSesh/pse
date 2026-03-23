@@ -708,9 +708,6 @@ pub fn compute_topological_signature(
     graph: &PersistentGraph,
     config: &TopologyConfig,
 ) -> TopologicalSignature {
-    use std::time::Instant;
-    let start = Instant::now();
-
     let n = graph.graph.node_count();
     let e = graph.graph.edge_count();
 
@@ -721,7 +718,15 @@ pub fn compute_topological_signature(
     let betti_1 = (e_u + betti_0).saturating_sub(n_u);
 
     let laplacian = compute_laplacian(graph);
-    let budget_exceeded = start.elapsed().as_millis() as u64 > config.budget_ms;
+
+    // Budget tracking: on native we use Instant, on WASM we skip budget checks
+    #[cfg(not(target_arch = "wasm32"))]
+    let budget_start = std::time::Instant::now();
+
+    #[cfg(not(target_arch = "wasm32"))]
+    let budget_exceeded = budget_start.elapsed().as_millis() as u64 > config.budget_ms;
+    #[cfg(target_arch = "wasm32")]
+    let budget_exceeded = false;
 
     let (spectral_gap, cheeger_estimate, dtl_predicates, mean_propagation_time, kuramoto_coherence);
 
@@ -744,8 +749,11 @@ pub fn compute_topological_signature(
         cheeger_estimate = spectral.cheeger_estimate;
         dtl_predicates = dtl_evaluate(graph, &spectral);
 
-        let elapsed = start.elapsed().as_millis() as u64;
-        if elapsed < config.budget_ms && n <= 100 {
+        #[cfg(not(target_arch = "wasm32"))]
+        let elapsed_ms = budget_start.elapsed().as_millis() as u64;
+        #[cfg(target_arch = "wasm32")]
+        let elapsed_ms = 0u64;
+        if elapsed_ms < config.budget_ms && n <= 100 {
             let ctqw = ctqw_propagate(&spectral, config);
             mean_propagation_time = if ctqw.mean_propagation_time.is_finite() {
                 ctqw.mean_propagation_time
