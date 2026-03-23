@@ -20,6 +20,7 @@ members = [
     "crates/pse-constraint",
     "crates/pse-swarm",
     "crates/pse-memory",
+    "crates/pse-net",
     "crates/pse-wasm",
     "crates/pse-gateway",
     "crates/pse-cli",

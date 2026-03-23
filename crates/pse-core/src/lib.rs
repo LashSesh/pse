@@ -104,6 +104,11 @@ pub struct GlobalState {
     pub pattern_hits: u64,
     /// Persistent pattern memory — topological similarity index for cross-session learning.
     pub memory: PatternMemory,
+    /// Optional navigator state for TRITON exploration persistence.
+    pub navigator_state: Option<pse_navigator::NavigatorState>,
+    /// Optional swarm node for distributed crystal propagation (requires `swarm` feature).
+    #[cfg(feature = "swarm")]
+    pub swarm_node: Option<pse_net::SwarmNode>,
 }
 
 impl GlobalState {
@@ -129,7 +134,16 @@ impl GlobalState {
             scale_state: pse_scale::MultiScaleState::default(),
             pattern_hits: 0,
             memory: PatternMemory::new(MemoryConfig::default()),
+            navigator_state: None,
+            #[cfg(feature = "swarm")]
+            swarm_node: None,
         }
+    }
+
+    /// Attach a swarm node for distributed crystal propagation.
+    #[cfg(feature = "swarm")]
+    pub fn with_swarm(&mut self, node: pse_net::SwarmNode) {
+        self.swarm_node = Some(node);
     }
 }
 
@@ -282,6 +296,16 @@ pub fn macro_step(
     config: &Config,
     adapter: &dyn ObservationAdapter,
 ) -> Result<Option<SemanticCrystal>> {
+    // Drain incoming crystals from swarm peers (if swarm is active)
+    #[cfg(feature = "swarm")]
+    if let Some(ref node) = state.swarm_node {
+        for envelope in node.drain_accepted() {
+            state.archive.append(envelope.crystal.clone());
+            let sig = pse_memory::PatternMemory::extract_signature(&envelope.crystal);
+            state.memory.insert(sig);
+        }
+    }
+
     // Unconditionally advance the macro-step counter so diagnostics and
     // downstream metrics always see a monotonically increasing tick index,
     // regardless of whether the step ends in a crystal commit or a gate
@@ -553,6 +577,12 @@ pub fn macro_step(
     // Add new crystal to pattern memory for future lookups (cross-session capable)
     let new_sig = pse_memory::PatternMemory::extract_signature(&crystal);
     state.memory.insert(new_sig);
+
+    // Propagate crystal to swarm peers (if swarm is active)
+    #[cfg(feature = "swarm")]
+    if let Some(ref node) = state.swarm_node {
+        let _ = node.propagate_crystal(crystal.clone());
+    }
 
     state.engine_state = EngineState::Committed;
     // commit_index is already incremented unconditionally at the top of

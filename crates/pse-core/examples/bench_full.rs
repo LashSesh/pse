@@ -81,6 +81,21 @@ fn main() {
 
     println!();
 
+    // Phase 5: TRITON Navigator
+    results.push(bench_b20_triton_step());
+    results.push(bench_b21_simplex_triangulate());
+    results.push(bench_b22_betti_computation());
+    results.push(bench_b23_singularity_scan());
+
+    // Phase 6: Distributed Swarm
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        results.push(bench_b24_swarm_propagate());
+        results.push(bench_b25_swarm_accept());
+    }
+
+    println!();
+
     // Write JSON
     write_results_json(&results);
 
@@ -1006,6 +1021,211 @@ fn bench_b19_cross_session() -> BenchResult {
 }
 
 // ─── JSON Output ─────────────────────────────────────────────────────────────
+
+// ─── Phase 5: TRITON Navigator ──────────────────────────────────────────────
+
+fn bench_b20_triton_step() -> BenchResult {
+    use pse_navigator::{NavigatorConfig, TritonNavigator};
+    let config = NavigatorConfig { dim: 3, k: 3, seed: 42, ..Default::default() };
+    let mut nav = TritonNavigator::new(config, |params: &[f64]| {
+        let r = params.iter().sum::<f64>() / params.len() as f64;
+        SpectralSignature::new(r, r, r)
+    });
+
+    let n = 100;
+    let start = Instant::now();
+    for _ in 0..n {
+        nav.step();
+    }
+    let elapsed = start.elapsed();
+    let us_per = elapsed.as_micros() as f64 / n as f64;
+    println!("B20 triton_step:         {:.1} µs/step ({} steps)", us_per, n);
+    BenchResult {
+        key: "B20_triton_step", value: us_per,
+        unit: "µs/step", detail: format!("{} steps, {} singularities", n, nav.singularity_count()),
+    }
+}
+
+fn bench_b21_simplex_triangulate() -> BenchResult {
+    use pse_navigator::{SimplexMesh};
+    let mut mesh = SimplexMesh::new();
+    let sig = SpectralSignature::new(0.5, 0.5, 0.5);
+    let n = 500;
+    let start = Instant::now();
+    for i in 0..n {
+        let v = mesh.add_vertex(&[
+            (i as f64 * 0.1).sin(),
+            (i as f64 * 0.15).cos(),
+        ], &sig);
+        mesh.incremental_triangulate(v, 4);
+    }
+    let elapsed = start.elapsed();
+    let us = elapsed.as_micros() as f64;
+    println!("B21 simplex_triangulate: {:.1} µs ({} vertices, {} edges)", us, mesh.vertex_count(), mesh.edges.len());
+    BenchResult {
+        key: "B21_simplex_triangulate", value: us,
+        unit: "µs", detail: format!("{} vertices, {} edges, {} simplices", n, mesh.edges.len(), mesh.simplices.len()),
+    }
+}
+
+fn bench_b22_betti_computation() -> BenchResult {
+    use pse_navigator::SimplexMesh;
+    let mut mesh = SimplexMesh::new();
+    let sig = SpectralSignature::new(0.5, 0.5, 0.5);
+    for i in 0..500 {
+        let v = mesh.add_vertex(&[(i as f64 * 0.1).sin(), (i as f64 * 0.15).cos()], &sig);
+        mesh.incremental_triangulate(v, 3);
+    }
+
+    let n = 100;
+    let start = Instant::now();
+    for _ in 0..n {
+        let _betti = mesh.betti_numbers();
+    }
+    let elapsed = start.elapsed();
+    let us_per = elapsed.as_micros() as f64 / n as f64;
+    println!("B22 betti_computation:   {:.1} µs/call (500-vertex mesh)", us_per);
+    BenchResult {
+        key: "B22_betti_computation", value: us_per,
+        unit: "µs/call", detail: format!("500 vertices, {} calls", n),
+    }
+}
+
+fn bench_b23_singularity_scan() -> BenchResult {
+    use pse_navigator::SimplexMesh;
+    let mut mesh = SimplexMesh::new();
+    let sig = SpectralSignature::new(0.5, 0.5, 0.5);
+    for i in 0..100 {
+        let v = mesh.add_vertex(&[(i as f64 * 0.1).sin(), (i as f64 * 0.15).cos()], &sig);
+        mesh.incremental_triangulate(v, 3);
+    }
+
+    let n = 10;
+    let start = Instant::now();
+    for _ in 0..n {
+        let _sings = mesh.detect_spectral_singularities(0.01);
+    }
+    let elapsed = start.elapsed();
+    let us_per = elapsed.as_micros() as f64 / n as f64;
+    println!("B23 singularity_scan:    {:.1} µs/call (100-vertex mesh)", us_per);
+    BenchResult {
+        key: "B23_singularity_scan", value: us_per,
+        unit: "µs/call", detail: format!("100 vertices, {} calls", n),
+    }
+}
+
+// ─── Phase 6: Distributed Swarm ─────────────────────────────────────────────
+
+#[cfg(not(target_arch = "wasm32"))]
+fn bench_b24_swarm_propagate() -> BenchResult {
+    use pse_net::{SwarmConfig, SwarmNode};
+
+    let mut config = SwarmConfig::default();
+    config.node_seed = 42;
+    let mut node1 = SwarmNode::new(config.clone());
+    node1.start().expect("node1 start");
+    let addr1 = node1.local_addr().expect("addr1");
+
+    config.node_seed = 43;
+    let mut node2 = SwarmNode::new(config);
+    node2.start().expect("node2 start");
+    node2.connect_peer(&addr1.to_string()).expect("connect");
+    std::thread::sleep(std::time::Duration::from_millis(100));
+
+    // Build test crystal
+    let crystal = pse_types::SemanticCrystal {
+        crystal_id: [42u8; 32],
+        region: vec![1, 2, 3],
+        constraint_program: Vec::new(),
+        stability_score: 0.9,
+        topology_signature: pse_types::TopologySignature {
+            betti_0: 1, betti_1: 0, betti_2: 0,
+            spectral_gap: 0.5, euler_char: 1,
+            cheeger_estimate: 0.3, kuramoto_coherence: 0.8,
+            mean_propagation_time: 1.0, dtl_connected: true,
+        },
+        betti_numbers: vec![1, 0, 0],
+        evidence_chain: Vec::new(),
+        commit_proof: pse_types::CommitProof::default(),
+        operator_versions: BTreeMap::new(),
+        created_at: 1,
+        free_energy: 0.1,
+        carrier_instance_idx: 0,
+        scale_tag: String::new(),
+        universe_id: String::new(),
+        sub_crystal_ids: Vec::new(),
+        parent_crystal_ids: Vec::new(),
+        genesis_metadata: None,
+    };
+
+    let n = 100;
+    let start = Instant::now();
+    for _ in 0..n {
+        let _ = node2.propagate_crystal(crystal.clone());
+    }
+    let elapsed = start.elapsed();
+    let us_per = elapsed.as_micros() as f64 / n as f64;
+
+    node1.stop();
+    node2.stop();
+
+    println!("B24 swarm_propagate:     {:.1} µs/propagation ({} iterations)", us_per, n);
+    BenchResult {
+        key: "B24_swarm_propagate", value: us_per,
+        unit: "µs/propagation", detail: format!("{} propagations to 1 peer", n),
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn bench_b25_swarm_accept() -> BenchResult {
+    use pse_net::accept_crystal;
+
+    // Build local crystals with similar spectral gaps
+    let build_crystal = |gap: f64| -> pse_types::SemanticCrystal {
+        pse_types::SemanticCrystal {
+            crystal_id: [0u8; 32],
+            region: vec![1],
+            constraint_program: Vec::new(),
+            stability_score: 0.9,
+            topology_signature: pse_types::TopologySignature {
+                betti_0: 1, betti_1: 0, betti_2: 0,
+                spectral_gap: gap, euler_char: 1,
+                cheeger_estimate: 0.3, kuramoto_coherence: 0.8,
+                mean_propagation_time: 1.0, dtl_connected: true,
+            },
+            betti_numbers: vec![1, 0, 0],
+            evidence_chain: Vec::new(),
+            commit_proof: pse_types::CommitProof::default(),
+            operator_versions: BTreeMap::new(),
+            created_at: 1,
+            free_energy: 0.1,
+            carrier_instance_idx: 0,
+            scale_tag: String::new(),
+            universe_id: String::new(),
+            sub_crystal_ids: Vec::new(),
+            parent_crystal_ids: Vec::new(),
+            genesis_metadata: None,
+        }
+    };
+
+    let locals: Vec<pse_types::SemanticCrystal> = (0..100).map(|i| build_crystal(0.4 + i as f64 * 0.001)).collect();
+    let local_refs: Vec<&pse_types::SemanticCrystal> = locals.iter().collect();
+    let incoming = build_crystal(0.45);
+
+    let n = 10000;
+    let start = Instant::now();
+    for _ in 0..n {
+        let _ = accept_crystal(&local_refs, &incoming, 0.51);
+    }
+    let elapsed = start.elapsed();
+    let us_per = elapsed.as_micros() as f64 / n as f64;
+
+    println!("B25 swarm_accept:        {:.1} µs/check (100 local crystals)", us_per);
+    BenchResult {
+        key: "B25_swarm_accept", value: us_per,
+        unit: "µs/check", detail: format!("{} checks against 100 locals", n),
+    }
+}
 
 fn write_results_json(results: &[BenchResult]) {
     let mut result_map = serde_json::Map::new();

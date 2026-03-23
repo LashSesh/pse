@@ -34,6 +34,10 @@ fn print_usage() {
     eprintln!("MEMORY:");
     eprintln!("  pse memory                Show pattern memory status");
     eprintln!();
+    eprintln!("SWARM:");
+    eprintln!("  pse swarm demo            Run 3-node localhost demo");
+    eprintln!("  pse swarm status          Show swarm node status");
+    eprintln!();
     eprintln!("WASM:");
     eprintln!("  pse build-wasm            Build WebAssembly target");
     eprintln!();
@@ -396,6 +400,21 @@ fn cmd_memory() {
     }
 }
 
+fn cmd_swarm(args: &[String]) {
+    let sub = args.first().map(|s| s.as_str()).unwrap_or("demo");
+    match sub {
+        "demo" => {
+            println!("Starting 3-node swarm demo...");
+            println!("Run: cargo run --example swarm_demo -p pse-net");
+        }
+        "status" => {
+            println!("Swarm status: no active node");
+            println!("  Use --swarm with observe commands to enable distributed mode");
+        }
+        _ => eprintln!("Unknown swarm command: {}. Use: demo, status", sub),
+    }
+}
+
 fn cmd_build_wasm() {
     println!("Building PSE for WebAssembly...");
     let status = std::process::Command::new("wasm-pack")
@@ -448,6 +467,7 @@ fn main() {
         "accumulation" => cmd_accumulation(),
         "audit" => cmd_audit(&args[2..]),
         "memory" => cmd_memory(),
+        "swarm" => cmd_swarm(&args[2..]),
         "build-wasm" => cmd_build_wasm(),
         "navigate" => println!("Navigator: not yet configured."),
         "bench" => println!("Benchmark suite: run 'cargo run --release --example bench_full -p pse-core'."),
