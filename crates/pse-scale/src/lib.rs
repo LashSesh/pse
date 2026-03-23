@@ -774,7 +774,6 @@ pub fn multi_scale_tick(
     micro_crystals: &[SemanticCrystal],
     tick: u64,
 ) -> MultiScaleTickResult {
-    use std::time::Instant;
     let mut events = Vec::new();
     let mut meso_crystals = Vec::new();
     let mut macro_crystals = Vec::new();
@@ -792,8 +791,14 @@ pub fn multi_scale_tick(
     let n_micro = vertex_ids.len() as f64;
 
     // ── MS2: Lift micro → meso ────────────────────────────────────────────────
-    let meso_start = Instant::now();
-    if meso_start.elapsed().as_millis() as u64 > config.meso.budget_ms && vertex_ids.len() > 100 {
+    #[cfg(not(target_arch = "wasm32"))]
+    let meso_budget_exceeded = {
+        let meso_start = std::time::Instant::now();
+        meso_start.elapsed().as_millis() as u64 > config.meso.budget_ms
+    };
+    #[cfg(target_arch = "wasm32")]
+    let meso_budget_exceeded = false;
+    if meso_budget_exceeded && vertex_ids.len() > 100 {
         events.push(ScaleEvent::MesoBudgetExceeded);
         return MultiScaleTickResult {
             meso_crystals, macro_crystals,
@@ -853,8 +858,14 @@ pub fn multi_scale_tick(
     }
 
     // ── MS5: Lift meso → macro ────────────────────────────────────────────────
-    let macro_start = Instant::now();
-    if macro_start.elapsed().as_millis() as u64 > config.macro_cfg.budget_ms {
+    #[cfg(not(target_arch = "wasm32"))]
+    let macro_budget_exceeded = {
+        let macro_start = std::time::Instant::now();
+        macro_start.elapsed().as_millis() as u64 > config.macro_cfg.budget_ms
+    };
+    #[cfg(target_arch = "wasm32")]
+    let macro_budget_exceeded = false;
+    if macro_budget_exceeded {
         events.push(ScaleEvent::MacroBudgetExceeded);
     } else if config.macro_cfg.enabled && n_clusters >= config.macro_cfg.min_domain_size {
         // Second-order clustering: cluster the cluster IDs by their aggregate

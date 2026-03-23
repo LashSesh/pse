@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PSE — Post-Symbolic Engine</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>PSE — Post-Symbolic Engine</h1>
+            <p>Universal computation through topology, physics, and geometry</p>
+            <div class="privacy-badge">No data leaves your machine — all processing runs locally in your browser</div>
+        </header>
+
+        <div id="loading" style="text-align:center;padding:3rem;color:#8b949e;">Loading WASM engine...</div>
+
+        <div id="app" style="display:none;">
+
+            <!-- Upload Area -->
+            <div id="upload-area" class="upload-area">
+                <p>Drag & drop a CSV file here, or click to select</p>
+                <p style="font-size:0.75rem;margin-top:0.25rem;">Upload CSV → Get quality report + crystals</p>
+                <input type="file" id="csv-input" accept=".csv">
+            </div>
+            <div id="upload-status" style="font-size:0.82rem;color:#3fb950;margin-bottom:0.75rem;"></div>
+
+            <!-- Controls -->
+            <div class="controls">
+                <button id="btn-sample" class="sample">Try with sample data</button>
+                <button id="btn-run">Run Engine</button>
+                <div class="tick-control">
+                    <label>Ticks:</label>
+                    <input type="range" id="tick-slider" min="100" max="10000" value="500" step="100">
+                    <span id="tick-value">500</span>
+                </div>
+                <button id="btn-reset" class="secondary">Reset Observations</button>
+                <button id="btn-reset-all" class="secondary">Full Reset</button>
+            </div>
+            <div id="run-result" style="font-size:0.82rem;color:#58a6ff;margin-bottom:0.75rem;"></div>
+
+            <!-- Status Bar -->
+            <div class="status-bar">
+                <div class="stat">Ticks: <span id="stat-ticks">0</span></div>
+                <div class="stat">Crystals: <span id="stat-crystals">0</span></div>
+                <div class="stat">Vertices: <span id="stat-vertices">0</span></div>
+                <div class="stat">Memory: <span id="stat-memory">0</span></div>
+                <div class="stat">Hit Rate: <span id="stat-hitrate">—</span></div>
+            </div>
+
+            <!-- Tabs -->
+            <div class="tabs">
+                <div class="tab active" data-tab="quality">Quality Report</div>
+                <div class="tab" data-tab="crystals">Crystals</div>
+                <div class="tab" data-tab="curve">Accumulation Curve</div>
+            </div>
+
+            <!-- Tab Content -->
+            <div id="quality-content" class="tab-content active">
+                <div class="empty-state">Upload CSV data to see quality report</div>
+            </div>
+            <div id="crystals-content" class="tab-content">
+                <div class="empty-state">Run the engine to discover crystals</div>
+            </div>
+            <div id="curve-content" class="tab-content">
+                <div class="empty-state">Run the engine to see accumulation curve</div>
+            </div>
+
+        </div>
+
+        <footer>
+            PSE v0.2.0 | MIT License | Running locally in your browser — no data leaves your machine
+        </footer>
+    </div>
+
+    <script type="module" src="pse.js"></script>
+</body>
+</html>

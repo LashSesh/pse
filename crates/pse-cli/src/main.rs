@@ -31,6 +31,12 @@ fn print_usage() {
     eprintln!("AUDIT:");
     eprintln!("  pse audit [--summary] [--verify-only]");
     eprintln!();
+    eprintln!("MEMORY:");
+    eprintln!("  pse memory                Show pattern memory status");
+    eprintln!();
+    eprintln!("WASM:");
+    eprintln!("  pse build-wasm            Build WebAssembly target");
+    eprintln!();
     eprintln!("GENERAL:");
     eprintln!("  pse run [ticks]           Run macro-step loop");
     eprintln!("  pse serve [addr]          Start gateway server");
@@ -354,6 +360,64 @@ fn cmd_audit(args: &[String]) {
     }
 }
 
+fn cmd_memory() {
+    use pse_store::{IslandStore, CrystalStore};
+
+    let db_path = std::path::Path::new("pse.db");
+    if !db_path.exists() {
+        println!("Pattern memory: no store found (pse.db)");
+        println!("  Run `pse observe ...` first to build crystal store.");
+        return;
+    }
+
+    match IslandStore::open(db_path) {
+        Ok(store) => {
+            let count = store.crystal_count().unwrap_or(0);
+            let mut memory = pse_memory::PatternMemory::new(pse_memory::MemoryConfig::default());
+
+            // Load crystals from store and build signatures
+            if let Ok(rows) = store.list_all_crystals() {
+                let crystals: Vec<pse_types::SemanticCrystal> = rows.iter()
+                    .filter_map(|row| serde_json::from_str(&row.data).ok())
+                    .collect();
+                memory.load_from_crystals(&crystals);
+            }
+
+            let stats = memory.stats();
+            println!("Pattern memory: {} signatures", stats.index_size);
+            println!("  Store: {} crystals in pse.db", count);
+            println!("  Session hits: {} / {} ({:.1}%)",
+                stats.hits, stats.total_lookups,
+                if stats.total_lookups > 0 { stats.hit_rate * 100.0 } else { 0.0 });
+            println!("  Index size: {:.1} KB",
+                stats.index_size as f64 * std::mem::size_of::<pse_memory::CrystalSignature>() as f64 / 1024.0);
+        }
+        Err(e) => eprintln!("Error opening store: {}", e),
+    }
+}
+
+fn cmd_build_wasm() {
+    println!("Building PSE for WebAssembly...");
+    let status = std::process::Command::new("wasm-pack")
+        .args(["build", "crates/pse-wasm", "--target", "web", "--out-dir", "../../web/pkg"])
+        .status();
+
+    match status {
+        Ok(s) if s.success() => {
+            println!("Build complete!");
+            if let Ok(metadata) = std::fs::metadata("web/pkg/pse_wasm_bg.wasm") {
+                println!("WASM size: {} bytes", metadata.len());
+            }
+            println!();
+            println!("To serve locally:");
+            println!("  cd web && python3 -m http.server 8080");
+            println!("  → http://localhost:8080");
+        }
+        Ok(s) => eprintln!("wasm-pack exited with: {}", s),
+        Err(e) => eprintln!("Failed to run wasm-pack: {}. Install with: cargo install wasm-pack", e),
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 { print_usage(); std::process::exit(1); }
@@ -383,6 +447,8 @@ fn main() {
         "crystals" => cmd_crystals(&args[2..]),
         "accumulation" => cmd_accumulation(),
         "audit" => cmd_audit(&args[2..]),
+        "memory" => cmd_memory(),
+        "build-wasm" => cmd_build_wasm(),
         "navigate" => println!("Navigator: not yet configured."),
         "bench" => println!("Benchmark suite: run 'cargo run --release --example bench_full -p pse-core'."),
         "serve" => {

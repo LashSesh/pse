@@ -1,0 +1,40 @@
+[package]
+name = "pse-wasm"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "WebAssembly build of PSE — runs in any browser"
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+pse-types = { path = "../pse-types" }
+pse-core = { path = "../pse-core" }
+pse-graph = { path = "../pse-graph" }
+pse-extract = { path = "../pse-extract" }
+pse-cascade = { path = "../pse-cascade" }
+pse-evidence = { path = "../pse-evidence" }
+pse-registry = { path = "../pse-registry" }
+pse-topology = { path = "../pse-topology" }
+pse-constraint = { path = "../pse-constraint" }
+pse-scale = { path = "../pse-scale" }
+pse-navigator = { path = "../pse-navigator" }
+pse-scheduler = { path = "../pse-scheduler" }
+pse-replay = { path = "../pse-replay" }
+pse-manifest = { path = "../pse-manifest" }
+pse-pmhd = { path = "../pse-pmhd" }
+pse-memory = { path = "../pse-memory" }
+pse-capsule = { path = "../pse-capsule" }
+pse-swarm = { path = "../pse-swarm" }
+pse-store = { path = "../pse-store", default-features = false, features = ["memory-only"] }
+pse-adapter-tabular = { path = "../../adapters/pse-adapter-tabular" }
+wasm-bindgen = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+console_error_panic_hook = { workspace = true }
+getrandom = { workspace = true }
